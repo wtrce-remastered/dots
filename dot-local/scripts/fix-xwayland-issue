@@ -5,7 +5,7 @@ if [[ $(whoami) != "root" ]]; then
     exit 1
 fi
 
-targets_file="/home/wtrceremastered/.local/scripts/fix-xwayland-issue.targets"
+targets_file="/home/wtrcersd/.local/scripts/fix-xwayland-issue.targets"
 flags="--enable-features=UseOzonePlatform --ozone-platform=wayland"
 
 if [ ! -f "$targets_file" ]; then
