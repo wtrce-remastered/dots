@@ -9,24 +9,23 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# DEFINING TARGET USER
+# CREATING DEV USER
 
-read -p "Enter target user: " TUSR
+TUSR="dev"
+TUSR_D="/home/$TUSR"
 
 if ! id "$TUSR" &>/dev/null; then
-    echo "User '$TUSR' does not exists"
-    exit 1
+    useradd -m -s /bin/bash "$TUSR"
+    echo "User '$TUSR' created, set the password:"
+    passwd "$TUSR"
 fi
 
 # DEFINING CONSTS
 
-TUSR_D="/home/$TUSR"
-
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOT_CONFIGS_PATH="$TUSR_D/.config"
-LOCAL_SCRIPTS_PATH="$TUSR_D/.local/scripts"
+LOCAL_PSCRIPTS_PATH="$TUSR_D/.local/scripts/path"
 
 NVIM_CONFIG_DIR="/etc/xdg/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
@@ -34,7 +33,7 @@ TMUX_CONFIG_FILE="/etc/tmux.conf"
 # INSTALLING PACKAGES
 
 pacman -Syu --noconfirm
-xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
+xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
 
 # SETUP NVIM
 
@@ -49,7 +48,7 @@ fi
 
 cp -f "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
 
-# I'M TARGET USER
+# I'M DEV USER
 
 sudo -u "$TUSR" /bin/bash << EOF
 cd "$TUSR_D"
@@ -59,13 +58,10 @@ cd "$TUSR_D"
 cp -f "$DOTS_DIR_PATH/.bashrc" "$TUSR_D/"
 cp -f "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 
-# SETUP CONFIGS AND SCRIPTS
+# SETUP TMUX SESSIONIZER
 
-mkdir -p "$DOT_CONFIGS_PATH"
-mkdir -p "$LOCAL_SCRIPTS_PATH"
-
-cp -rf "$DOTS_DIR_PATH/dot-config/"* "$DOT_CONFIGS_PATH/"
-cp -rf "$DOTS_DIR_PATH/dot-local/scripts/"* "$LOCAL_SCRIPTS_PATH/"
+mkdir -p "$LOCAL_PSCRIPTS_PATH"
+cp -rf "$DOTS_DIR_PATH/dot-local/scripts/path/"* "$LOCAL_PSCRIPTS_PATH/"
 EOF
 
 echo "Reboot to apply changes"

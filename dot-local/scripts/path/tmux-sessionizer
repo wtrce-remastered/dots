@@ -3,7 +3,8 @@
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$(find $HOME/dev/code $HOME/dev/abs -mindepth 1 -maxdepth 1 -type d | fzf)
+    sesionizer_sources=`xargs echo < $HOME/.local/scripts/tmux-sessionizer.sources`
+    selected=$(find $sesionizer_sources -mindepth 1 -maxdepth 1 -type d | fzf)
 fi
 
 if [[ -z $selected ]]; then

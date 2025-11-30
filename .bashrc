@@ -11,3 +11,5 @@ eval "$(fzf --bash)"
 
 export EDITOR="nvim"
 alias vi="nvim"
+
+PATH=$PATH:$HOME/.local/scripts/path
