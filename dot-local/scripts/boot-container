@@ -1,0 +1,10 @@
+#!/bin/bash
+
+cbox="/home/con/containers"
+ctarget=$(find $cbox/ -mindepth 1 -maxdepth 1 -type d | tr ' ' '\n' | fzf)
+
+if [ -z $ctarget ]; then
+    exit 1
+fi
+
+systemd-nspawn -D $ctarget --background=

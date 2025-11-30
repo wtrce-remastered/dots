@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+if pactl get-source-mute @DEFAULT_SOURCE@ | grep -q 'yes'; then
+  mic_state=0
+else
+  mic_state=1
+fi
+
+if pactl get-source-mute @DEFAULT_SOURCE@ | grep -q 'yes'; then
+  mic_state=0
+else
+  mic_state=1
+fi
+
+if pactl get-sink-mute @DEFAULT_SINK@ | grep -q 'yes'; then
+  sink_state=0
+else
+  sink_state=1
+fi
+
+notify-send -r 5555 -t 1500 "$mic_state$sink_state"

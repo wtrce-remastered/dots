@@ -1,0 +1,31 @@
+#!/bin/bash
+
+if [[ $(whoami) != "root" ]]; then
+    echo "Should be runned from root"
+    exit 1
+fi
+
+targets_file="/home/wtrceremastered/.local/scripts/fix-xwayland-issue.targets"
+flags="--enable-features=UseOzonePlatform --ozone-platform=wayland"
+
+if [ ! -f "$targets_file" ]; then
+    echo "Error: Targets file not found at $targets_file"
+    exit 1
+fi
+
+readarray -t targets < "$targets_file"
+
+for target in "${targets[@]}"; do
+    if [ ! -f "$target" ]; then
+        echo "Skipping non-existent file: $target"
+        continue
+    fi
+
+    if grep -q "Exec=.*$flags" "$target"; then
+        echo "Flags already present in $target. Skipping."
+        continue
+    fi
+
+    echo "Adding flags to $target."
+    sed -i.bak "s/^Exec=.*/& $flags/" "$target"
+done
