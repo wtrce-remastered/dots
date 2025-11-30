@@ -30,11 +30,13 @@ TMUX_CONFIG_FILE="/etc/tmux.conf"
 
 # CLONE DOTS DIRECTORY
 
+pacman -Syu --noconfirm
+pacman -S --noconfirm --needed git
+
 su - "$TUSR" -c "git clone $GIT_DOTS_REPO $DOTS_DIR_PATH"
 
 # INSTALLING PACKAGES
 
-pacman -Syu --noconfirm
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
 
 # SETUP NVIM
