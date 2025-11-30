@@ -20,7 +20,7 @@ fi
 
 TUSR_D="/home/$TUSR"
 
-GIT_NVIM_REPO="link here..."
+GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOT_CONFIGS_PATH="$TUSR_D/.config"
@@ -65,3 +65,5 @@ mkdir -p "$LOCAL_SCRIPTS_PATH"
 cp -rf "$DOTS_DIR_PATH/dot-config/"* "$DOT_CONFIGS_PATH/"
 cp -rf "$DOTS_DIR_PATH/dot-local/scripts/"* "$LOCAL_SCRIPTS_PATH/"
 EOF
+
+echo "Reboot to apply changes"
