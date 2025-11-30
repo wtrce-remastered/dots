@@ -4,7 +4,7 @@ fzf
 git
 grep
 neovim
-riggrep
+ripgrep
 openssh
 openssl
 tar
