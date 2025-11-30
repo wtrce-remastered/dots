@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -e
-
 # I'M ROOT
 
 if [[ $EUID -ne 0 ]]; then
