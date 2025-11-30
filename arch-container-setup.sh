@@ -48,7 +48,7 @@ cp -f "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
 
 # I'M DEV USER
 
-sudo -u "$TUSR" /bin/bash << EOF
+su - "$TUSR" << EOF
 cd "$TUSR_D"
 
 # SETUP BASH
