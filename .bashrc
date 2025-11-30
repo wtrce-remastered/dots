@@ -12,6 +12,4 @@ eval "$(fzf --bash)"
 export EDITOR="nvim"
 alias vi="nvim"
 
-export XDG_CONFIG_HOME="/etc/xdg"
-
 PATH=$PATH:$HOME/.local/scripts/path
