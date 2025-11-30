@@ -24,7 +24,7 @@ GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 DOTS_DIR_PATH="$TUSR_D/dots"
 LOCAL_PSCRIPTS_PATH="$TUSR_D/.local/scripts/path"
 
-NVIM_CONFIG_DIR="/etc/xdg/nvim"
+NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
 
 # CLONE DOTS DIRECTORY
@@ -39,15 +39,6 @@ EOF
 # INSTALLING PACKAGES
 
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
-
-# SETUP NVIM
-
-if [[ ! -d "$NVIM_CONFIG_DIR" ]]; then
-    git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
-else
-    rm -rf "$NVIM_CONFIG_DIR"
-    git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
-fi
 
 # SETUP TMUX
 
@@ -67,6 +58,18 @@ cp -f "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 
 mkdir -p "$LOCAL_PSCRIPTS_PATH"
 cp -rf "$DOTS_DIR_PATH/dot-local/scripts/path/"* "$LOCAL_PSCRIPTS_PATH/"
+
+# SETUP NVIM
+
+mkdir -p "$TUSR_D/.config"
+
+if [[ ! -d "$NVIM_CONFIG_DIR" ]]; then
+    git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
+else
+    rm -rf "$NVIM_CONFIG_DIR"
+    git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
+fi
+
 EOF
 
 echo "Reboot to apply changes"
