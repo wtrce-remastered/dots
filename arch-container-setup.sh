@@ -16,10 +16,9 @@ if ! id "$TUSR" &>/dev/null; then
     passwd "$TUSR"
 fi
 
-GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
-
 # DEFINING CONSTS
 
+GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$TUSR_D/dots"
@@ -33,7 +32,9 @@ TMUX_CONFIG_FILE="/etc/tmux.conf"
 pacman -Syu --noconfirm
 pacman -S --noconfirm --needed git
 
-su - "$TUSR" -c "git clone $GIT_DOTS_REPO $DOTS_DIR_PATH"
+su - "$TUSR" << EOF
+git clone $GIT_DOTS_REPO $DOTS_DIR_PATH
+EOF
 
 # INSTALLING PACKAGES
 
