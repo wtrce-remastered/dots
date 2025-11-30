@@ -1,5 +1,3 @@
-#!/usr/bin/env bash
-
 # I'M ROOT
 
 if [[ $EUID -ne 0 ]]; then
@@ -18,15 +16,21 @@ if ! id "$TUSR" &>/dev/null; then
     passwd "$TUSR"
 fi
 
+GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
+
 # DEFINING CONSTS
 
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
-DOTS_DIR_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTS_DIR_PATH="$TUSR_D/dots"
 LOCAL_PSCRIPTS_PATH="$TUSR_D/.local/scripts/path"
 
 NVIM_CONFIG_DIR="/etc/xdg/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
+
+# CLONE DOTS DIRECTORY
+
+su - "$TUSR" -c "git clone $GIT_DOTS_REPO $DOTS_DIR_PATH"
 
 # INSTALLING PACKAGES
 
