@@ -63,6 +63,7 @@ cd "$TUSR_D"
 
 mkdir -p "$DOT_LOCAL_PATH/scripts"
 ln -sf "$DOTS_DIR_PATH/dot-local/scripts/path" "$DOT_LOCAL_PATH/scripts/"
+touch "$DOT_LOCAL_PATH/scripts/tmuxs-sources"
 
 # SETUP NVIM
 
