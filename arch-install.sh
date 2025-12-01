@@ -9,12 +9,12 @@ fi
 
 # DEFINING TARGET USER
 
-read -p "Enter target user: " TUSR
+read -p "Enter target user: " TUSR < /dev/tty
 
 if ! id "$TUSR" &>/dev/null; then
     useradd -m -s /bin/bash "$TUSR"
     echo "User '$TUSR' created, set the password:"
-    passwd "$TUSR"
+    passwd "$TUSR" < /dev/tty
 fi
 
 # DEFINING CONSTS
