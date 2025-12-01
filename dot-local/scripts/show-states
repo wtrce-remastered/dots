@@ -6,12 +6,6 @@ else
   mic_state=1
 fi
 
-if pactl get-source-mute @DEFAULT_SOURCE@ | grep -q 'yes'; then
-  mic_state=0
-else
-  mic_state=1
-fi
-
 if pactl get-sink-mute @DEFAULT_SINK@ | grep -q 'yes'; then
   sink_state=0
 else
