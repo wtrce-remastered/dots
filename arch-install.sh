@@ -47,6 +47,22 @@ fi
 
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
 
+# DISABLING CAMERA
+
+echo "blacklist uvcvideo" >> /etc/modprobe.d/nowebcam.conf
+
+# DISABLING AUTO-SUSPEND IF LAPTOP CLOSED
+
+LOGIND_CONF_PATH="/etc/systemd/logind.conf"
+
+sed -i '/^[[:space:]]*HandleLidSwitch\(ExternalPower\|Docked\)\?[[:space:]]*=.*/d' "$LOGIND_CONF_PATH"
+
+{
+    echo "HandleLidSwitch=ignore"
+    echo "HandleLidSwitchExternalPower=ignore"
+    echo "HandleLidSwitchDocked=ignore"
+} >> "$LOGIND_CONF_PATH"
+
 # SETUP TMUX
 
 ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
