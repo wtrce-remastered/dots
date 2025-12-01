@@ -15,3 +15,6 @@ tmux
 zip
 unzip
 wget
+which
+yazi
+gcc
