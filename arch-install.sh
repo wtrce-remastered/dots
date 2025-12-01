@@ -83,6 +83,7 @@ mkdir -p "$DOT_LOCAL_PATH"
 
 ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIG_PATH"
 ln -sf "$DOTS_DIR_PATH/dot-local/scripts" "$DOT_LOCAL_PATH/"
+ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/"
 
 if [[ ! -d "$NVIM_CONFIG_DIR" ]]; then
     git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"

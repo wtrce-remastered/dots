@@ -59,10 +59,9 @@ ln -sf "$DOTS_DIR_PATH/.inputrc" "$INPUTRC_PATH"
 su - "$TUSR" << EOF
 cd "$TUSR_D"
 
-# SETUP PATH SCRIPTS
+# SETUP LOCAL BIN
 
-mkdir -p "$DOT_LOCAL_PATH/scripts"
-ln -sf "$DOTS_DIR_PATH/dot-local/scripts/path" "$DOT_LOCAL_PATH/scripts/"
+ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/bin"
 touch "$DOT_LOCAL_PATH/scripts/tmuxs-sources"
 
 # SETUP NVIM
