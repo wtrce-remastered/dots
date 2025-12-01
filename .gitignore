@@ -1,0 +1,7 @@
+dot-config/*
+
+!dot-config/alacritty
+!dot-config/hypr
+!dot-config/kanshi
+!dot-config/rofi
+!dot-config/xkb
