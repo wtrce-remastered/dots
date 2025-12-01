@@ -62,7 +62,6 @@ ln -sf "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 
 # SETUP CONFIGS AND SCRIPTS
 
-mkdir -p "$DOT_CONFIG_PATH"
 mkdir -p "$DOT_LOCAL_PATH"
 
 ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIG_PATH"
