@@ -12,8 +12,9 @@ fi
 read -p "Enter target user: " TUSR
 
 if ! id "$TUSR" &>/dev/null; then
-    echo "User '$TUSR' does not exists"
-    exit 1
+    useradd -m -s /bin/bash "$TUSR"
+    echo "User '$TUSR' created, set the password:"
+    passwd "$TUSR"
 fi
 
 # DEFINING CONSTS
@@ -22,16 +23,24 @@ TUSR_D="/home/$TUSR"
 
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
-DOTS_DIR_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOTS_DIR_PATH="$TUSR_D/dots"
 DOT_CONFIG_PATH="$TUSR_D/.config"
 LOCAL_SCRIPTS_PATH="$TUSR_D/.local/scripts"
 
 NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
 
-# INSTALLING PACKAGES
+# CLONE DOTS DIRECTORY
 
 pacman -Syu --noconfirm
+pacman -S --noconfirm --needed git
+
+if [ ! -d "$DOTS_DIR_PATH" ]; then
+    su -c "git clone $GIT_DOTS_REPO $DOTS_DIR_PATH" $TUSR
+fi
+
+# INSTALLING PACKAGES
+
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
 
 # SETUP TMUX

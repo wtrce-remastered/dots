@@ -1,8 +1,7 @@
 # Install on Arch
 
 ```bash
-git clone https://github.com/wtrce-remastered/dots $HOME/.dots && cd $HOME/.dots \
-    su root -c "chmod +x ./arch-install.sh && ./arch-install.sh"
+curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/master/arch-install.sh | bash
 ```
 
 # Install container on Arch
