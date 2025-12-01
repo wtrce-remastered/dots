@@ -61,6 +61,8 @@ cd "$TUSR_D"
 
 # SETUP LOCAL BIN
 
+mkdir -p "$DOT_LOCAL_PATH"
+
 ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/bin"
 touch "$DOT_LOCAL_PATH/scripts/tmuxs-sources"
 
