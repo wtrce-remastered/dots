@@ -21,6 +21,7 @@ fi
 
 TUSR_D="/home/$TUSR"
 
+GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$TUSR_D/dots"
