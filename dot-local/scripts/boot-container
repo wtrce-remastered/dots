@@ -7,5 +7,5 @@ if [ -z $ctarget ]; then
     exit 1
 fi
 
-# systemd-nspawn -D $ctarget --user=dev --as-pid2 --background=
-systemd-nspawn -D $ctarget --background=
+systemd-nspawn -D $ctarget --user=dev --as-pid2 --background=
+# systemd-nspawn -D $ctarget --background=
