@@ -15,7 +15,7 @@ TUSR_D="/home/$TUSR"
 if ! id "$TUSR" &>/dev/null; then
     useradd -m -s /bin/bash "$TUSR"
     echo "User '$TUSR' created, set the password:"
-    passwd "$TUSR"
+    passwd "$TUSR" < /dev/tty
 fi
 
 # DEFINING CONSTS
