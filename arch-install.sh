@@ -26,7 +26,7 @@ GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$TUSR_D/dots"
 DOT_CONFIG_PATH="$TUSR_D/.config"
-LOCAL_SCRIPTS_PATH="$TUSR_D/.local/scripts"
+DOT_LOCAL_PATH="$TUSR_D/.local"
 
 NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
@@ -63,10 +63,10 @@ ln -sf "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 # SETUP CONFIGS AND SCRIPTS
 
 mkdir -p "$DOT_CONFIG_PATH"
-mkdir -p "$LOCAL_SCRIPTS_PATH"
+mkdir -p "$DOT_LOCAL_PATH"
 
-ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIGS_PATH"
-ln -sf "$DOTS_DIR_PATH/dot-local/scripts" "$LOCAL_SCRIPTS_PATH"
+ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIG_PATH"
+ln -sf "$DOTS_DIR_PATH/dot-local/scripts" "$DOT_LOCAL_PATH/"
 
 if [[ ! -d "$NVIM_CONFIG_DIR" ]]; then
     git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
