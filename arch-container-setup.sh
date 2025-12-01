@@ -29,6 +29,9 @@ DOT_LOCAL_PATH="$TUSR_D/.local"
 NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
 
+BASHRC_PATH="/etc/bash.bashrc"
+INPUTRC_PATH="/etc/inputrc"
+
 # CLONE DOTS DIRECTORY
 
 pacman -Syu --noconfirm
@@ -46,15 +49,15 @@ xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
 
 ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
 
+# SETUP BASH
+
+ln -sf "$DOTS_DIR_PATH/.bashrc" "$BASHRC_PATH"
+ln -sf "$DOTS_DIR_PATH/.inputrc" "$INPUTRC_PATH"
+
 # I'M DEV USER
 
 su - "$TUSR" << EOF
 cd "$TUSR_D"
-
-# SETUP BASH
-
-ln -sf "$DOTS_DIR_PATH/.bashrc" "$TUSR_D/"
-ln -sf "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 
 # SETUP PATH SCRIPTS
 
