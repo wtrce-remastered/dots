@@ -24,7 +24,7 @@ GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
 DOTS_DIR_PATH="$TUSR_D/dots"
-LOCAL_SCRIPTS_PATH="$TUSR_D/.local/scripts"
+DOT_LOCAL_PATH="$TUSR_D/.local"
 
 NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
 TMUX_CONFIG_FILE="/etc/tmux.conf"
@@ -58,8 +58,8 @@ ln -sf "$DOTS_DIR_PATH/.inputrc" "$TUSR_D/"
 
 # SETUP PATH SCRIPTS
 
-mkdir -p "$LOCAL_SCRIPTS_PATH"
-ln -sf "$DOTS_DIR_PATH/dot-local/scripts/path" "$LOCAL_SCRIPTS_PATH"
+mkdir -p "$DOT_LOCAL_PATH/scripts"
+ln -sf "$DOTS_DIR_PATH/dot-local/scripts/path" "$DOT_LOCAL_PATH/scripts/"
 
 # SETUP NVIM
 
