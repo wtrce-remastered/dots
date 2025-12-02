@@ -18,3 +18,5 @@ wget
 which
 yazi
 gcc
+rlwrap
+translate-shell

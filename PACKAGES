@@ -29,3 +29,5 @@ zip
 which
 yazi
 gcc
+rlwrap
+translate-shell

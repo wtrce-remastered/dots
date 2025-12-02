@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+TO_LANG="$1"
+
+trans -I -tl "$TO_LANG"
