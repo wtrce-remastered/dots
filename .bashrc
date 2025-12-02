@@ -13,3 +13,6 @@ export EDITOR="nvim"
 alias vi="nvim"
 
 PATH=$PATH:$HOME/.local/bin
+
+export r="$HOME"
+export cs="/tmp/con-share"

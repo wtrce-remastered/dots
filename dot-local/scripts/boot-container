@@ -7,5 +7,10 @@ if [ -z $ctarget ]; then
     exit 1
 fi
 
-systemd-nspawn -D $ctarget --user=dev --as-pid2 --background=
-# systemd-nspawn -D $ctarget --background=
+SHARE_DIR="/tmp/con-share"
+if [ ! -d "$SHARE_DIR" ]; then
+    mkdir -p "$SHARE_DIR"
+    chmod 777 "$SHARE_DIR"
+fi
+
+systemd-nspawn -D $ctarget --background=
