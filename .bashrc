@@ -14,5 +14,10 @@ alias vi="nvim"
 
 PATH=$PATH:$HOME/.local/bin
 
-export r="$HOME"
+WF_ROOT_FILE="$HOME/.config/wfr_path"
+if [ -f "$WF_ROOT_FILE" ]; then
+    export r="$(cat $WF_ROOT_FILE)"
+fi
+
+export h="$HOME"
 export cs="/tmp/con-share"

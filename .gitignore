@@ -5,3 +5,4 @@ dot-config/*
 !dot-config/kanshi
 !dot-config/rofi
 !dot-config/xkb
+!dot-config/tmux-sessionizer
