@@ -64,7 +64,6 @@ cd "$TUSR_D"
 mkdir -p "$DOT_LOCAL_PATH"
 
 ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/bin"
-touch "$DOT_LOCAL_PATH/scripts/tmuxs-sources"
 
 # SETUP NVIM
 
