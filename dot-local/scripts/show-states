@@ -12,4 +12,10 @@ else
   sink_state=1
 fi
 
-notify-send -r 5555 -t 1500 "$mic_state$sink_state"
+if [ "$(nmcli networking)" = "enabled" ]; then
+  net_state=1
+else
+  net_state=0
+fi
+
+notify-send -r 5555 -t 1500 "$mic_state$sink_state$net_state"
