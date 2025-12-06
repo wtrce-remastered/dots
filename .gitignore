@@ -6,3 +6,4 @@ dot-config/*
 !dot-config/rofi
 !dot-config/xkb
 !dot-config/tmux-sessionizer
+!dot-config/zathura

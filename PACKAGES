@@ -32,3 +32,5 @@ gcc
 rlwrap
 translate-shell
 yt-dlp
+zathura
+zathura-pdf-mupdf
