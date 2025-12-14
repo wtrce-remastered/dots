@@ -60,7 +60,7 @@ xkb_symbols "basic" {
     key <RALT> { [ Super_R ] };
 
     key <LCTL> { [ Alt_R ] };
-    key <LWIN> { [ Control_R ] };
+    key <LWIN> { [ Alt_R ] };
 
     modifier_map Control { <RCTL>, <LALT>, <LWIN> };
 };

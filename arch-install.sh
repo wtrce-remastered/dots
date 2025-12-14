@@ -55,6 +55,10 @@ tldr --update
 
 echo "blacklist uvcvideo" >> /etc/modprobe.d/nowebcam.conf
 
+# HID APPLE KEYBOARD
+
+echo "options hid_apple fnmode=2" >> /etc/modprobe.d/hid_apple.conf
+
 # DISABLING AUTO-SUSPEND IF LAPTOP CLOSED
 
 LOGIND_CONF_PATH="/etc/systemd/logind.conf"
