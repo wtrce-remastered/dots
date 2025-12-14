@@ -45,6 +45,10 @@ EOF
 
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
 
+# tealdeer db update
+
+tldr --update
+
 # SETUP TMUX
 
 ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"

@@ -47,6 +47,10 @@ fi
 
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
 
+# tealdeer db update
+
+tldr --update
+
 # DISABLING CAMERA
 
 echo "blacklist uvcvideo" >> /etc/modprobe.d/nowebcam.conf
