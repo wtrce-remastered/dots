@@ -2,4 +2,4 @@
 
 TO_LANG="$1"
 
-trans -I -tl "$TO_LANG"
+trans -inet4-only -I -tl "$TO_LANG"
