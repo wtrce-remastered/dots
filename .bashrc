@@ -10,6 +10,8 @@ PS1='[\u@\h \W]\$ '
 eval "$(fzf --bash)"
 
 export EDITOR="nvim"
+export TERMINAL="/usr/bin/alacritty"
+
 alias vi="nvim"
 
 PATH=$PATH:$HOME/.local/bin
