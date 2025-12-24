@@ -23,7 +23,7 @@ fi
 GIT_DOTS_REPO="https://github.com/wtrce-remastered/dots"
 GIT_NVIM_REPO="https://github.com/wtrce-remastered/nvim-config"
 
-DOTS_DIR_PATH="$TUSR_D/dots"
+DOTS_DIR_PATH="$TUSR_D/.dots"
 DOT_LOCAL_PATH="$TUSR_D/.local"
 
 NVIM_CONFIG_DIR="$TUSR_D/.config/nvim"
