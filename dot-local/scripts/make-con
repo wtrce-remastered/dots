@@ -18,6 +18,10 @@ CON_CONFIGS_PATH="/etc/systemd/nspawn"
 
 # CON BOX SETUP IF NOT EXIST
 
+if ! [ -d "/tmp/con-share/" ]; then
+    mkdir -p "/tmp/con-share/"
+fi
+
 if ! [ -d "$CON_BOX_PATH" ]; then
     mkdir -p "$CON_BOX_PATH"
     chmod "$CON_BOX_PBITS" "$CON_BOX_PATH"

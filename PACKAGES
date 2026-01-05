@@ -39,3 +39,8 @@ pulseaudio
 pavucontrol
 bluez
 bluez-utils
+mako
+-dunst
+-kitty
+-dolphin
+-wofi

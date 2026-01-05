@@ -43,7 +43,8 @@ EOF
 
 # INSTALLING PACKAGES
 
-xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/CONTAINER-PACKAGES"
+for pkg in $(grep '^-' "$DOTS_DIR_PATH/CONTAINER-PACKAGES" | sed 's/^-//'); do pacman --noconfirm -Rns "$pkg" || true; done
+grep -v '^-' "$DOTS_DIR_PATH/CONTAINER-PACKAGES" | xargs pacman -S --needed --noconfirm --
 
 # SETUP TMUX
 

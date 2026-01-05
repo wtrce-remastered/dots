@@ -55,7 +55,8 @@ ln -sf "$DOTS_DIR_PATH/default.nspawn" "$CON_BOX_PATH"
 
 # INSTALLING PACKAGES
 
-xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
+for pkg in $(grep '^-' "$DOTS_DIR_PATH/PACKAGES" | sed 's/^-//'); do pacman --noconfirm -Rns "$pkg" || true; done
+grep -v '^-' "$DOTS_DIR_PATH/PACKAGES" | xargs pacman -S --needed --noconfirm --
 
 # DISABLING CAMERA
 
@@ -69,7 +70,7 @@ echo "options hid_apple fnmode=2" >> /etc/modprobe.d/hid_apple.conf
 
 LOGIND_CONF_PATH="/etc/systemd/logind.conf"
 
-sed -i '/^[[:space:]]*HandleLidSwitch\(ExternalPower\|Docked\)\?[[:space:]]*=.*/d' "$LOGIND_CONF_PATH"
+sed -i '/^*HandleLidSwitch\(ExternalPower\|Docked\)\?[[:space:]]*=.*/d' "$LOGIND_CONF_PATH"
 
 {
     echo "HandleLidSwitch=ignore"
