@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# I'M ROOT
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Run this script as root"
+    exit 1
+fi
+
+# ARGUMENTS
+
+con_name="$1"
+
+if [ -z "$con_name" ]; then
+    echo "Usage: $0 <container_name>"
+    exit 1
+fi
+
+con_box_path="/home/con/containers"
+con_configs_path="/etc/systemd/nspawn"
+
+con_path="$con_box_path/$con_name"
+
+if ! [ -d "$con_path" ]; then
+    echo "Container '$con_path' does not exists"
+    exit 1
+fi
+
+# REMOVING
+
+rm -rf "$con_path" && rm -f "$con_configs_path/$con_name"

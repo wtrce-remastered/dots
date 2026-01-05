@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# I'M ROOT
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Run this script as root"
+    exit 1
+fi
+
+# ARGUMENTS
+
+CON_SETUP_SCRIPT_URL="https://raw.githubusercontent.com/wtrce-remastered/dots/master/arch-container-setup.sh"
+
+con_name="$1"
+
+if [ -z "$con_name" ]; then
+    echo "Usage: $0 <container_name>"
+    exit 1
+fi
+
+con_box_path="/home/con/containers"
+con_configs_path="/etc/systemd/nspawn"
+
+con_path="$con_box_path/$con_name"
+
+if [ -d "$con_path" ]; then
+    echo "$con_path already exists"
+    exit 1
+fi
+
+# CREATING
+
+mkdir -p "$con_path" \
+    && pacstrap -K -c "$con_path" base \
+    && systemd-nspawn -D "$con_path" --background= /bin/bash -c "echo 'Pass for root' && passwd && curl -sL $CON_SETUP_SCRIPT_URL | /bin/bash" \
+    && mkdir -p "$con_configs_path" && ln -sf "$con_box_path/default.nspawn" "$con_configs_path/$con_name.nspawn"
