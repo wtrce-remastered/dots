@@ -68,6 +68,10 @@ ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/bin"
 # SETUP NVIM
 
 mkdir -p "$TUSR_D/.config"
+mkdir -p "$TUSR_D/dr"
+
+echo "$TUSR_D/dr" >> "$TUSR_D/.config/wfr_path"
+echo "$TUSR_D/dr" >> "$TUSR_D/.config/tmuxs-sources"
 
 if [[ ! -d "$NVIM_CONFIG_DIR" ]]; then
     git clone "$GIT_NVIM_REPO" "$NVIM_CONFIG_DIR"
