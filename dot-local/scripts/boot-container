@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cbox="/home/con/containers"
+cbox="/var/rsd/containers"
 ctarget=$(find $cbox/ -mindepth 1 -maxdepth 1 -type d | tr ' ' '\n' | fzf)
 
 if [ -z $ctarget ]; then

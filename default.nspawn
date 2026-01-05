@@ -1,0 +1,6 @@
+[Exec]
+Boot=on
+PrivateUsers=pick
+
+[Files]
+Bind=/tmp/con-share:/tmp/con-share

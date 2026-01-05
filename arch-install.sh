@@ -43,6 +43,16 @@ if [ ! -d "$DOTS_DIR_PATH" ]; then
     su -c "git clone $GIT_DOTS_REPO $DOTS_DIR_PATH" $TUSR
 fi
 
+# SETUP CONTAINERS
+
+CON_BOX_PATH="/var/rsd/containers"
+CON_BOX_PBITS="700"
+
+mkdir -p "$CON_BOX_PATH"
+chmod "$CON_BOX_PBITS" "$CON_BOX_PATH"
+
+ln -sf "$DOTS_DIR_PATH/default.nspawn" "$CON_BOX_PATH"
+
 # INSTALLING PACKAGES
 
 xargs pacman -S --noconfirm --needed < "$DOTS_DIR_PATH/PACKAGES"
