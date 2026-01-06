@@ -8,3 +8,7 @@ dot-config/*
 !dot-config/xkb
 !dot-config/tmux-sessionizer
 !dot-config/zathura
+
+# zen browser
+
+dot-local/bin/zen
