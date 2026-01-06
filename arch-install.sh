@@ -78,6 +78,10 @@ sed -i '/^*HandleLidSwitch\(ExternalPower\|Docked\)\?[[:space:]]*=.*/d' "$LOGIND
     echo "HandleLidSwitchDocked=ignore"
 } >> "$LOGIND_CONF_PATH"
 
+# install sddm theme
+
+git clone -b main --depth=1 https://github.com/uiriansan/SilentSDDM /tmp/silent_sddm_theme && /tmp/silent_sddm_theme/install.sh
+
 # SETUP TMUX
 
 ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
@@ -86,6 +90,10 @@ ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
 
 ln -sf "$DOTS_DIR_PATH/.bashrc" "$BASHRC_PATH"
 ln -sf "$DOTS_DIR_PATH/.inputrc" "$INPUTRC_PATH"
+
+# SETUP SYSTEMWIDE XKB LAYOUT
+
+ln -sf "$DOTS_DIR_PATH/xkb.qwerty" "/usr/share/X11/xkb/us"
 
 # I'M TARGET USER
 
