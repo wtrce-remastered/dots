@@ -89,7 +89,7 @@ ln -sf "$DOTS_DIR_PATH/.inputrc" "$INPUTRC_PATH"
 
 # SETUP SYSTEMWIDE XKB LAYOUT
 
-ln -sf "$DOTS_DIR_PATH/xkb.qwerty" "/usr/share/X11/xkb/us"
+ln -sf "$DOTS_DIR_PATH/xkb.qwerty" "/usr/share/xkeyboard-config-2/symbols/us"
 
 # I'M TARGET USER
 
