@@ -78,10 +78,6 @@ sed -i '/^*HandleLidSwitch\(ExternalPower\|Docked\)\?[[:space:]]*=.*/d' "$LOGIND
     echo "HandleLidSwitchDocked=ignore"
 } >> "$LOGIND_CONF_PATH"
 
-# install sddm theme
-
-git clone -b main --depth=1 https://github.com/uiriansan/SilentSDDM /tmp/silent_sddm_theme && /tmp/silent_sddm_theme/install.sh
-
 # SETUP TMUX
 
 ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
@@ -130,3 +126,7 @@ EOF
 cd $HOME
 mkdir .config
 ln -sf "$NVIM_CONFIG_DIR" $HOME/.config/nvim
+
+# install sddm theme
+
+git clone -b main --depth=1 https://github.com/uiriansan/SilentSDDM /tmp/silent_sddm_theme && /tmp/silent_sddm_theme/install.sh
