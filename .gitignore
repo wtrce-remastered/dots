@@ -4,7 +4,6 @@ dot-config/*
 !dot-config/hypr
 dot-config/hypr/.env.hyprland
 !dot-config/btop
-!dot-config/kanshi
 !dot-config/rofi
 !dot-config/xkb
 !dot-config/tmux-sessionizer
