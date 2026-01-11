@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+message="$1"
+duration="$2"
+
+while true; do
+    read -p "$message"
+    sleep "$duration"
+done

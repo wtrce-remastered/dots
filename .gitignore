@@ -2,6 +2,7 @@ dot-config/*
 
 !dot-config/alacritty
 !dot-config/hypr
+dot-config/hypr/.env.hyprland
 !dot-config/btop
 !dot-config/kanshi
 !dot-config/rofi
