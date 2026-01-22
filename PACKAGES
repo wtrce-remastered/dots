@@ -42,6 +42,9 @@ pavucontrol
 bluez
 bluez-utils
 mako
+qt6-svg
+qt6-virtualkeyboard
+qt6-multimedia-ffmpeg
 -dunst
 -kitty
 -dolphin
