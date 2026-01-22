@@ -119,6 +119,10 @@ curl -fsSL https://github.com/zen-browser/updates-server/raw/refs/heads/main/ins
 
 tldr --update
 
+# flathub
+
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
 EOF
 
 # NVIM FOR ROOT

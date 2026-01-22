@@ -28,6 +28,7 @@ zip
 which
 yazi
 gcc
+flatpak
 rlwrap
 translate-shell
 yt-dlp
