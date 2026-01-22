@@ -7,5 +7,7 @@ xkb_symbols "basic" {
     key <LCTL> { [ Alt_R ] };
     key <LWIN> { [ Alt_R ] };
 
+    key <CAPS> { [ Super_R ] };
+
     modifier_map Control { <RCTL>, <LALT>, <LWIN> };
 };
