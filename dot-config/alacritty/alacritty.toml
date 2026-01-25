@@ -58,8 +58,3 @@ style = "Medium"
 
 [env]
 TERM = "xterm-256color"
-
-[keyboard]
-bindings = [
-    { key = "Tab", mods = "None", chars = "$" }
-]
