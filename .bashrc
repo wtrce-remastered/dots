@@ -13,6 +13,7 @@ export EDITOR="nvim"
 export TERMINAL="/usr/bin/alacritty"
 
 alias vi="nvim"
+alias zj="zellij"
 
 PATH=$PATH:$HOME/.local/bin
 

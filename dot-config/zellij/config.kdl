@@ -1,0 +1,88 @@
+simplified_ui true
+pane_frames false
+
+default_layout "initial"
+default_mode "locked"
+mouse_mode false
+
+show_startup_tips false
+
+keybinds clear-defaults=true {
+    normal {
+        bind "Ctrl s" { SwitchToMode "scroll"; }
+        bind "Ctrl p" { SwitchToMode "pane"; }
+        bind "Ctrl t" { SwitchToMode "tab"; }
+
+        bind "Ctrl w" { CloseFocus; }
+        bind "Ctrl d" { Detach; }
+        bind "Ctrl g" { EditScrollback; SwitchToMode "locked"; }
+
+        bind "h" { MoveFocus "Left"; }
+        bind "j" { MoveFocus "Down"; }
+        bind "k" { MoveFocus "Up"; }
+        bind "l" { MoveFocus "Right"; }
+
+        bind "Shift h" { GoToNextTab; }
+        bind "Shift l" { GoToPreviousTab; }
+
+        bind "1" { GoToTab 1; }
+        bind "2" { GoToTab 2; }
+        bind "3" { GoToTab 3; }
+        bind "4" { GoToTab 4; }
+        bind "5" { GoToTab 5; }
+
+        bind "t" { NewTab; SwitchToMode "locked"; }
+        bind "Ctrl l" { ToggleTab; }
+
+        bind "s" { NewPane "Right"; }
+        bind "Shift s" { NewPane "Down"; }
+
+        bind "Ctrl Shift s" { ToggleActiveSyncTab; }
+        bind "Ctrl s" { ToggleFloatingPanes; SwitchToMode "locked"; }
+
+        bind "f" { ToggleFocusFullscreen; }
+    }
+    locked {
+        bind "Ctrl ;" { SwitchToMode "normal"; }
+        bind "Ctrl m" { Write 13; }
+    }
+    pane {
+        bind "Ctrl Shift d" { DumpScreen "/tmp/zj-dump"; }
+
+        bind "Shift h" { Resize "Left"; }
+        bind "Shift j" { Resize "Down"; }
+        bind "Shift k" { Resize "Up"; }
+        bind "Shift l" { Resize "Right"; }
+
+        bind "Ctrl Shift h" { MovePane "Left"; }
+        bind "Ctrl Shift j" { MovePane "Down"; }
+        bind "Ctrl Shift k" { MovePane "Up"; }
+        bind "Ctrl Shift l" { MovePane "Right"; }
+    }
+    tab {
+        bind "Ctrl Shift h" { MoveTab "Left"; }
+        bind "Ctrl Shift l" { MoveTab "Right"; }
+
+        bind "Ctrl r" { SwitchToMode "RenameTab"; }
+    }
+    scroll {
+        bind "j" { ScrollDown; }
+        bind "k" { ScrollUp; }
+
+        bind "Ctrl d" { HalfPageScrollDown; }
+        bind "Ctrl u" { HalfPageScrollUp; }
+
+        bind "g" { ScrollToTop; }
+        bind "Shift g" { ScrollToBottom; }
+    }
+    renametab {
+        bind "Ctrl h" { Write 8; }
+    }
+
+    shared_except "locked" {
+        bind "Ctrl ;" { SwitchToMode "locked"; }
+    }
+    shared_except "locked" {
+        bind "Ctrl q" { SwitchToMode "normal"; }
+    }
+}

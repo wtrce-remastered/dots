@@ -8,6 +8,7 @@ dot-config/hypr/.env.hyprland
 !dot-config/xkb
 !dot-config/tmux-sessionizer
 !dot-config/zathura
+!dot-config/zellij
 
 # zen browser
 
