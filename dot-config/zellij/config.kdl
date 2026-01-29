@@ -38,7 +38,7 @@ keybinds clear-defaults=true {
         bind "Shift s" { NewPane "Down"; }
 
         bind "Ctrl Shift s" { ToggleActiveSyncTab; }
-        bind "Ctrl s" { ToggleFloatingPanes; SwitchToMode "locked"; }
+        bind "Ctrl f" { ToggleFloatingPanes; SwitchToMode "locked"; }
 
         bind "f" { ToggleFocusFullscreen; }
     }
