@@ -74,6 +74,8 @@ keybinds clear-defaults=true {
 
         bind "g" { ScrollToTop; }
         bind "Shift g" { ScrollToBottom; }
+
+        bind "Ctrl l" { Clear; }
     }
     renametab {
         bind "Ctrl h" { Write 8; }
