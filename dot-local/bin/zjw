@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+    sesionizer_sources=$(xargs echo < "$HOME/.config/tmuxs-sources")
+    selected=$(find $sesionizer_sources -mindepth 1 -maxdepth 1 -type d | fzf)
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+selected_name=$(basename "$selected" | tr . _)
+
+if [[ -z $ZELLIJ ]]; then
+    echo "Error: must be inside a zellij session"
+    exit 1
+fi
+
+if zellij action query-tab-names | grep -q "^${selected_name}$"; then
+    zellij action go-to-tab-name "$selected_name"
+else
+    zellij action new-tab --name "$selected_name" --cwd "$selected"
+fi

@@ -34,6 +34,14 @@ keybinds clear-defaults=true {
         bind "t" { NewTab; SwitchToMode "locked"; }
         bind "Ctrl l" { ToggleTab; }
 
+        bind "Ctrl n" {
+            Run "zjw" {
+                floating true
+                close_on_exit true
+            };
+            SwitchToMode "locked";
+        }
+
         bind "s" { NewPane "Right"; }
         bind "Shift s" { NewPane "Down"; }
 
