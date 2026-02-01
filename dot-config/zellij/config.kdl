@@ -49,6 +49,11 @@ keybinds clear-defaults=true {
     pane {
         bind "Ctrl Shift d" { DumpScreen "/tmp/zj-dump"; }
 
+        bind "h" { MoveFocus "Left"; }
+        bind "j" { MoveFocus "Down"; }
+        bind "k" { MoveFocus "Up"; }
+        bind "l" { MoveFocus "Right"; }
+
         bind "Shift h" { Resize "Left"; }
         bind "Shift j" { Resize "Down"; }
         bind "Shift k" { Resize "Up"; }
