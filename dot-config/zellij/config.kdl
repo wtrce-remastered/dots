@@ -22,8 +22,15 @@ keybinds clear-defaults=true {
         bind "k" { MoveFocus "Up"; }
         bind "l" { MoveFocus "Right"; }
 
-        bind "Shift h" { GoToNextTab; }
-        bind "Shift l" { GoToPreviousTab; }
+        bind "Ctrl h" { MoveFocus "Left"; SwitchToMode "locked"; }
+        bind "Ctrl j" { MoveFocus "Down"; SwitchToMode "locked"; }
+        bind "Ctrl k" { MoveFocus "Up"; SwitchToMode "locked"; }
+        bind "Ctrl l" { MoveFocus "Right"; SwitchToMode "locked"; }
+
+        bind "Shift h" { GoToPreviousTab; }
+        bind "Shift l" { GoToNextTab; }
+
+        bind "Ctrl Shift l" { ToggleTab; SwitchToMode "locked"; }
 
         bind "1" { GoToTab 1; }
         bind "2" { GoToTab 2; }
@@ -31,8 +38,13 @@ keybinds clear-defaults=true {
         bind "4" { GoToTab 4; }
         bind "5" { GoToTab 5; }
 
+        bind "Ctrl 1" { GoToTab 1; SwitchToMode "locked"; }
+        bind "Ctrl 2" { GoToTab 2; SwitchToMode "locked"; }
+        bind "Ctrl 3" { GoToTab 3; SwitchToMode "locked"; }
+        bind "Ctrl 4" { GoToTab 4; SwitchToMode "locked"; }
+        bind "Ctrl 5" { GoToTab 5; SwitchToMode "locked"; }
+
         bind "t" { NewTab; SwitchToMode "locked"; }
-        bind "Ctrl l" { ToggleTab; }
 
         bind "Ctrl n" {
             Run "zjw" {
@@ -52,6 +64,7 @@ keybinds clear-defaults=true {
     }
     locked {
         bind "Ctrl ;" { SwitchToMode "normal"; }
+        bind "Ctrl Shift ;" { SwitchToMode "normal"; }
         bind "Ctrl m" { Write 13; }
     }
     pane {

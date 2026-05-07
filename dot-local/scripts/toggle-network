@@ -2,8 +2,6 @@
 
 if [ "$(nmcli networking)" = "enabled" ]; then
     nmcli networking off
-    notify-send "Network disabled"
 else
     nmcli networking on
-    notify-send "Network enabled"
 fi
