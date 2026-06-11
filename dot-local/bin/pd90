@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+sleep "90m"; notify-send "rest"
+sleep "10m"; notify-send "work"
+sleep "90m"; notify-send "done"

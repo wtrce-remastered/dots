@@ -35,25 +35,25 @@ index = 17
 color = '#b98d7b'
 
 [font]
-size = 14
+size = 13.5
 
 [window]
 opacity = 1
 
 [font.bold]
-family = "JetBrainsMono Nerd Font"
+family = "Hack"
 style = "Heavy"
 
 [font.bold_italic]
-family = "JetBrainsMono Nerd Font"
+family = "Hack"
 style = "Heavy Italic"
 
 [font.italic]
-family = "JetBrainsMono Nerd Font"
+family = "Hack"
 style = "Medium Italic"
 
 [font.normal]
-family = "JetBrainsMono Nerd Font"
+family = "Hack"
 style = "Medium"
 
 [env]
