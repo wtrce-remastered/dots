@@ -24,3 +24,5 @@ fi
 
 export h="$HOME"
 export cs="/tmp/con-share"
+
+export MANPAGER="nvim +Man!"
