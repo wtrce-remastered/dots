@@ -14,6 +14,7 @@ neovim
 ripgrep
 rofi-wayland
 openssh
+sshfs
 openssl
 tar
 slurp
