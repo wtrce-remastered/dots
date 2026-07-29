@@ -1,7 +1,7 @@
 # Install on Arch
 
 ```bash
-curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/master/arch-install.sh | bash
+curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/niri/arch-install.sh | bash
 ```
 
 # Install container on Arch
