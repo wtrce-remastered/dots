@@ -1,0 +1,102 @@
+* {
+    font: "Figtree 13";
+    g-spacing: 8px;
+    g-margin: 0;
+    b-color: #91abc4;
+    fg-color: #f5f5f5;
+    fgp-color: #ebf5fa;
+    b-radius: 4px;
+    g-padding: 6px;
+    hl-color: #FFFFFFFF;
+    hlt-color: #000000FF;
+    alt-color: #111111FF;
+    wbg-color: rgba(19, 26, 36, 0.4);
+    w-border: 1px solid;
+    w-border-color: transparent;
+    w-padding: 6px 8px;
+}
+
+configuration {
+    modi: "drun";
+    display-drun: "";
+    show-icons: true;
+}
+
+listview {
+    columns: 1;
+    lines: 10;
+    fixed-height: true;
+    fixed-columns: true;
+    cycle: false;
+    scrollbar: false;
+    border: 0px solid;
+}
+
+window {
+    transparency: "real";
+    width: 450px;
+    opacity: 0.4;
+    border-radius: @b-radius;
+    background-color: @wbg-color;
+    border: @w-border;
+    border-color: @w-border-color;
+    padding: @w-padding;
+}
+
+prompt {
+    text-color: @fg-color;
+}
+
+inputbar {
+    children: ["prompt", "entry"];
+    spacing: @g-spacing;
+}
+
+entry {
+    placeholder: "Search Apps";
+    text-color: @fg-color;
+    placeholder-color: @fgp-color;
+}
+
+mainbox {
+    spacing: @g-spacing;
+    margin: @g-margin;
+    padding: @g-padding;
+    children: ["inputbar", "listview", "message"];
+}
+
+element {
+    spacing: @g-spacing;
+    margin: @g-margin;
+    padding: @g-padding;
+    border: 0px solid;
+    border-radius: @b-radius;
+    border-color: @b-color;
+    background-color: transparent;
+    text-color: @fg-color;
+}
+
+element normal.normal {
+	background-color: transparent;
+	text-color: @fg-color;
+}
+
+element alternate.normal {
+	background-color: transparent;
+	text-color: @fg-color;
+}
+
+element selected.active {
+	background-color: @hl-color;
+	text-color: @hlt-color;
+}
+
+element selected.normal {
+	background-color: @hl-color;
+	text-color: @hlt-color;
+}
+
+message {
+    background-color: red;
+    border: 0px solid;
+}
