@@ -3,7 +3,6 @@ export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 export ZSH="$HOME/.oh-my-zsh"
 
 ZSH_THEME="af-magic"
-
 CASE_SENSITIVE="false"
 
 zstyle ':omz:update' mode disabled  # disable automatic updates
