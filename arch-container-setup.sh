@@ -32,10 +32,12 @@ TMUX_CONFIG_FILE="/etc/tmux.conf"
 BASHRC_PATH="/etc/bash.bashrc"
 INPUTRC_PATH="/etc/inputrc"
 
+ZSHRC_SYS_PATH="/etc/zsh/zshrc"
+
 # CLONE DOTS DIRECTORY
 
 pacman -Syu --noconfirm
-pacman -S --noconfirm --needed git
+pacman -S --noconfirm --needed git zsh
 
 su - "$TUSR" << EOF
 git clone $GIT_DOTS_REPO $DOTS_DIR_PATH
@@ -54,6 +56,22 @@ ln -sf "$DOTS_DIR_PATH/tmux.conf" "$TMUX_CONFIG_FILE"
 
 ln -sf "$DOTS_DIR_PATH/.bashrc" "$BASHRC_PATH"
 ln -sf "$DOTS_DIR_PATH/.inputrc" "$INPUTRC_PATH"
+
+# SETUP ZSH (SYSTEMWIDE RC, SAME PATTERN AS BASH)
+
+mkdir -p "$(dirname "$ZSHRC_SYS_PATH")"
+ln -sf "$DOTS_DIR_PATH/.zshrc" "$ZSHRC_SYS_PATH"
+
+setup_zsh_for_user() {
+    local user="$1"
+    local home_dir="$2"
+
+    chsh -s /usr/bin/zsh "$user"
+
+    if [[ ! -d "$home_dir/.oh-my-zsh" ]]; then
+        su - "$user" -c 'RUNZSH=no CHSH=no KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+    fi
+}
 
 # I'M DEV USER
 
@@ -87,8 +105,16 @@ tldr --update
 
 EOF
 
+# ZSH + OH-MY-ZSH FOR DEV USER
+
+setup_zsh_for_user "$TUSR" "$TUSR_D"
+
 # NVIM FOR ROOT
 
 cd $HOME
 mkdir .config
 ln -sf "$NVIM_CONFIG_DIR" $HOME/.config/nvim
+
+# ZSH + OH-MY-ZSH FOR ROOT
+
+setup_zsh_for_user "root" "/root"
