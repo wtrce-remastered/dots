@@ -1,7 +1,7 @@
 sudo
 libnotify
 fd
-alacritty
+foot
 brightnessctl
 btop
 curl
