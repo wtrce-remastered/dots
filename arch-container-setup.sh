@@ -69,7 +69,8 @@ setup_zsh_for_user() {
     chsh -s /usr/bin/zsh "$user"
 
     if [[ ! -d "$home_dir/.oh-my-zsh" ]]; then
-        su - "$user" -c 'RUNZSH=no CHSH=no KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+        su - "$user" -c 'RUNZSH=no CHSH=no KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.githubusercontent.c      om/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+        ln -sf "$ZSHRC_SYS_PATH" "$home_dir/.zshrc"
     fi
 }
 

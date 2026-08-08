@@ -7,5 +7,5 @@ curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/niri/arch-insta
 # Install container on Arch
 
 ```bash
-curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/master/arch-container-setup.sh | bash
+curl -sL https://raw.githubusercontent.com/wtrce-remastered/dots/niri/arch-container-setup.sh | bash
 ```

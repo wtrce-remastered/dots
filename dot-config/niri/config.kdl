@@ -85,20 +85,21 @@ window-rule {
 
 binds {
     Mod+T { spawn "foot"; }
-    Mod+S { spawn-sh "foot ~/.local/bin/ts"; }
+    Mod+S { spawn-sh "foot /usr/local/bin/_rs/ts"; }
 
     Mod+D { spawn-sh "rofi -config ~/.config/rofi/apps.rasi -show drun"; }
 
     Mod+Shift+C { spawn-sh "makoctl dismiss --all"; }
 
     Mod+Shift+P {
-        spawn "foot" "--title" "ask-for-sudo" "-e" "/usr/local/bin/proxy_toggle";
+        spawn "foot" "--title" "ask-for-sudo" "-e" "/usr/local/bin/_rs/proxy_toggle";
     }
 
     Mod+Shift+M { spawn-sh "mpv \"$(wl-paste)\""; }
 
     Mod+B { spawn "librewolf"; }
-    Mod+Shift+B { spawn-sh "librewolf --private-window"; }
+    Mod+Shift+B { spawn-sh "librewolf --private-window"; } // TODO make programs variables
+    Mod+Shift+A { spawn-sh "librewolf --new-window claude.ai/new"; } // TODO move to cursom config
 
     XF86AudioRaiseVolume { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
     XF86AudioLowerVolume { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }
