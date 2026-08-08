@@ -101,6 +101,9 @@ ZSH="/opt/etc/oh-my-zsh" \
 mkdir -p "$(dirname "$ZSHRC_PATH")"
 ln -sf "$DOTS_DIR_PATH/.zshrc" "$ZSHRC_PATH"
 
+chsh -s /usr/bin/zsh root
+chsh -s /usr/bin/zsh $TUSR
+
 # SETUP SYSTEMWIDE XKB LAYOUT
 
 ln -sf "$DOTS_DIR_PATH/xkb.qwerty" "/usr/share/xkeyboard-config-2/symbols/us"
@@ -118,6 +121,8 @@ touch ".zshrc"
 # SETUP CONFIGS AND SCRIPTS
 
 ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIG_PATH"
+
+mkdir -p "$DOT_LOCAL_PATH"
 ln -sf "$DOTS_DIR_PATH/dot-local/scripts" "$DOT_LOCAL_PATH/"
 ln -sf "$DOTS_DIR_PATH/dot-local/bin" "$DOT_LOCAL_PATH/"
 
