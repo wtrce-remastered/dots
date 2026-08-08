@@ -34,7 +34,7 @@ TMUX_CONFIG_FILE="/etc/tmux.conf"
 BASHRC_PATH="/etc/bash.bashrc"
 INPUTRC_PATH="/etc/inputrc"
 
-ZSHRC_SYS_PATH="/etc/zsh/zshrc"
+ZSHRC_PATH="/etc/zsh/zshrc"
 
 # CLONE DOTS DIRECTORY
 
@@ -116,8 +116,6 @@ cd "$TUSR_D"
 touch ".zshrc"
 
 # SETUP CONFIGS AND SCRIPTS
-
-mkdir -p "$DOT_LOCAL_PATH"
 
 ln -sf "$DOTS_DIR_PATH/dot-config" "$DOT_CONFIG_PATH"
 ln -sf "$DOTS_DIR_PATH/dot-local/scripts" "$DOT_LOCAL_PATH/"
