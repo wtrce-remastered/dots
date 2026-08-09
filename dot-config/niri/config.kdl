@@ -34,6 +34,11 @@ output "DP-1" {
     scale 1
 }
 
+output "eDP-1" {
+    mode "2560x1600@120"
+    scale 1.4
+}
+
 layout {
     gaps 0
 
@@ -71,7 +76,7 @@ prefer-no-csd
 screenshot-path "~/media/shots/%Y-%m-%d_%H-%M-%S.png"
 
 animations {
-    on
+    off
 }
 
 window-rule {

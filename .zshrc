@@ -18,7 +18,7 @@ DISABLE_CORRECTION="true"
 COMPLETION_WAITING_DOTS="true"
 DISABLE_UNTRACKED_FILES_DIRTY="true"
 
-plugins=(eza vi-mode fzf lol copypath copyfile)
+plugins=(vi-mode fzf lol eza copypath copyfile)
 
 autoload -Uz compinit
 zcd="${ZDOTDIR:-$HOME}/.zcompdump"
