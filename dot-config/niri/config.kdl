@@ -94,7 +94,7 @@ binds {
 
     Mod+D { spawn-sh "rofi -config ~/.config/rofi/apps.rasi -show drun"; }
 
-    Mod+Shift+C { spawn-sh "makoctl dismiss --all"; }
+    Mod+N { spawn-sh "makoctl dismiss --all"; }
 
     Mod+Shift+P {
         spawn "foot" "--title" "ask-for-sudo" "-e" "/usr/local/bin/_rs/proxy_toggle";
@@ -115,9 +115,6 @@ binds {
     XF86AudioStop        { spawn-sh "playerctl stop"; }
     XF86AudioPrev        { spawn-sh "playerctl previous"; }
     XF86AudioNext        { spawn-sh "playerctl next"; }
-
-    XF86MonBrightnessUp { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
-    XF86MonBrightnessDown { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }
