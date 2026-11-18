@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: $0 CYCLES WORK_DURATION REST_DURATION" >&2
+  echo "Example: $0 4 45m 5m" >&2
+  exit 2
+}
+
+[[ $# -eq 3 ]] || usage
+
+cycles=$1
+work_duration=$2
+rest_duration=$3
+
+[[ $cycles =~ ^[1-9][0-9]*$ ]] || usage
+
+for ((i = 1; i <= cycles; i++)); do
+  notify-send "work"
+  sleep "$work_duration"
+
+  if ((i < cycles)); then
+    notify-send "rest"
+    sleep "$rest_duration"
+  else
+    notify-send "done"
+  fi
+done

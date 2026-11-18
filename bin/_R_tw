@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+if [[ $# -eq 1 ]]; then
+    selected=$1
+else
+    mapfile -t lines < "$HOME/.config/tmuxs"
+    selected_dirs=()
+
+    for line in "${lines[@]}"; do
+        [[ -z "$line" ]] && continue
+        line="${line/#\~/$HOME}"
+        if [[ "$line" == */ ]]; then
+            while IFS= read -r d; do
+                selected_dirs+=("$d")
+            done < <(find "$line" -mindepth 1 -maxdepth 1 -type d)
+        else
+            selected_dirs+=("$line")
+        fi
+    done
+
+    selected=$(printf '%s\n' "${selected_dirs[@]}" | fzf)
+fi
+
+if [[ -z $selected ]]; then
+    exit 0
+fi
+
+selected_name=$(basename "$selected" | tr . _)
+
+if [[ -z $TMUX ]]; then
+    echo "Error: must be inside a tmux session"
+    exit 1
+fi
+
+if tmux list-windows -F '#W' | grep -q "^${selected_name}$"; then
+    tmux select-window -t "$selected_name"
+else
+    tmux new-window -n "$selected_name" -c "$selected"
+fi

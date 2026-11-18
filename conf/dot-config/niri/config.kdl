@@ -1,0 +1,207 @@
+environment {
+    ELECTRON_OZONE_PLATFORM_HINT "auto"
+}
+
+input {
+    keyboard {
+        repeat-delay 300
+        repeat-rate 70
+
+        xkb {
+            layout "us,ru"
+	    options "compose:ralt,grp:alt_shift_toggle"
+        }
+    }
+
+    touchpad {
+        tap
+        natural-scroll
+    }
+
+    warp-mouse-to-focus
+}
+
+cursor {
+    hide-after-inactive-ms 1000
+    hide-when-typing
+
+    xcursor-size 20
+}
+
+output "eDP-1" {
+    mode "2560x1600@120"
+    scale 1.4
+}
+
+layout {
+    gaps 0
+
+    center-focused-column "never"
+
+    preset-column-widths {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+    }
+
+    default-column-width {
+        proportion 0.5
+    }
+
+    focus-ring {
+        off
+    }
+
+    border {
+        off
+    }
+
+    shadow {
+        off
+    }
+}
+
+hotkey-overlay {
+    skip-at-startup
+}
+
+prefer-no-csd
+
+screenshot-path "~/media/shots/%Y-%m-%d_%H-%M-%S.png"
+
+animations {
+    off
+}
+
+gestures {
+    hot-corners {
+        off
+    }
+}
+
+window-rule {
+    match title="ask-for-sudo"
+    open-floating true
+
+    default-column-width { fixed 700; }
+    default-window-height { fixed 25; }
+}
+
+workspace "_1"
+workspace "_2"
+workspace "_3"
+workspace "_4"
+workspace "_5"
+workspace "_6"
+workspace "_7"
+workspace "_8"
+workspace "_9"
+workspace "_10"
+
+binds {
+    Mod+T { spawn "st"; }
+    Mod+S { spawn-sh "st /usr/local/bin/_R_ts"; }
+
+    Mod+D { spawn "fuzzel"; }
+
+    Mod+N { spawn-sh "makoctl dismiss --all"; }
+
+    Mod+B { spawn-sh "librewolf --private-window"; }
+
+    Mod+P { spawn-sh "/usr/local/bin/_R_infpd"; }
+
+    Mod+Shift+P { spawn-sh "st -T ask-for-sudo _R_proxy_toggle"; }
+
+    Mod+Shift+D { spawn-sh "st /usr/bin/btop"; }
+
+    XF86AudioMute        { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    XF86AudioMicMute     { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
+
+    Mod+O repeat=false { toggle-overview; }
+    Mod+Q repeat=false { close-window; }
+
+    Mod+H     { focus-column-left; }
+    Mod+J     { focus-window-or-workspace-down; }
+    Mod+K     { focus-window-or-workspace-up; }
+    Mod+L     { focus-column-right; }
+
+    Mod+Ctrl+H     { move-column-left; }
+    Mod+Ctrl+J     { move-window-down-or-to-workspace-down; }
+    Mod+Ctrl+K     { move-window-up-or-to-workspace-up; }
+    Mod+Ctrl+L     { move-column-right; }
+
+    Mod+Shift+H     { focus-monitor-left; }
+    Mod+Shift+J     { focus-monitor-down; }
+    Mod+Shift+K     { focus-monitor-up; }
+    Mod+Shift+L     { focus-monitor-right; }
+    
+    // XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }
+    // XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
+
+    Mod+1 { focus-workspace "_1"; }
+    Mod+2 { focus-workspace "_2"; }
+    Mod+3 { focus-workspace "_3"; }
+    Mod+4 { focus-workspace "_4"; }
+    Mod+5 { focus-workspace "_5"; }
+    Mod+6 { focus-workspace "_6"; }
+    Mod+7 { focus-workspace "_7"; }
+    Mod+8 { focus-workspace "_8"; }
+    Mod+9 { focus-workspace "_9"; }
+    Mod+0 { focus-workspace "_10"; }
+
+    Mod+Shift+1 { move-column-to-workspace "_1"; }
+    Mod+Shift+2 { move-column-to-workspace "_2"; }
+    Mod+Shift+3 { move-column-to-workspace "_3"; }
+    Mod+Shift+4 { move-column-to-workspace "_4"; }
+    Mod+Shift+5 { move-column-to-workspace "_5"; }
+    Mod+Shift+6 { move-column-to-workspace "_6"; }
+    Mod+Shift+7 { move-column-to-workspace "_7"; }
+    Mod+Shift+8 { move-column-to-workspace "_8"; }
+    Mod+Shift+9 { move-column-to-workspace "_9"; }
+    Mod+Shift+0 { move-column-to-workspace "_10"; }
+
+    Mod+Tab { focus-workspace-previous; }
+
+    Mod+BracketLeft  { consume-or-expel-window-left; }
+    Mod+BracketRight { consume-or-expel-window-right; }
+
+    Mod+Comma  { consume-window-into-column; }
+    Mod+Period { expel-window-from-column; }
+
+    Mod+R { switch-preset-column-width; }
+    Mod+Shift+R { switch-preset-column-width-back; }
+
+    Mod+Ctrl+Shift+R { switch-preset-window-height; }
+    Mod+Ctrl+R { reset-window-height; }
+
+    Mod+F { maximize-column; }
+    Mod+Shift+F { fullscreen-window; }
+
+    Mod+M { maximize-window-to-edges; }
+
+    Mod+Ctrl+F { expand-column-to-available-width; }
+
+    Mod+C { center-column; }
+
+    Mod+Ctrl+C { center-visible-columns; }
+
+    Mod+Minus { set-column-width "-10%"; }
+    Mod+Equal { set-column-width "+10%"; }
+
+    Mod+Shift+Minus { set-window-height "-10%"; }
+    Mod+Shift+Equal { set-window-height "+10%"; }
+
+    Mod+V       { toggle-window-floating; }
+    Mod+Shift+V { switch-focus-between-floating-and-tiling; }
+
+    Mod+W { toggle-column-tabbed-display; }
+
+    Mod+Space       { switch-layout "next"; }
+
+    Print { screenshot; }
+
+    Mod+Shift+E { quit; }
+
+    Mod+Shift+Q { spawn-sh "systemctl suspend"; }
+    // Mod+Shift+S { power-off-monitors; }
+}

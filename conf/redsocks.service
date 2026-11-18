@@ -1,0 +1,16 @@
+[Unit]
+Description=RedSocks
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+ExecStartPre=/usr/local/bin/_R_rs_setup
+ExecStart=/usr/bin/redsocks -c /etc/redsocks.conf
+ExecStop=/usr/local/bin/_R_rs_cleanup
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target

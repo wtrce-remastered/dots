@@ -1,0 +1,3 @@
+#!/bin/sh
+
+yt-dlp --write-subs --write-auto-subs --sub-langs "$1" --skip-download --sub-format srt "$2"

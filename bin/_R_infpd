@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+PID_FILE="/tmp/infpd.pid"
+WORK_TIME="45m"
+BREAK_TIME="5m"
+
+# If already running, stop it
+if [[ -f "$PID_FILE" ]]; then
+  pid=$(<"$PID_FILE")
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+
+    # Wait briefly for graceful cleanup of the active sleep process
+    for _ in {1..10}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+
+    rm -f "$PID_FILE"
+    echo "infpd is stopped"
+    notify-send -t 1000 "infpd is stopped"
+    exit 0
+  else
+    # Clean up stale PID file if the process is no longer alive
+    rm -f "$PID_FILE"
+  fi
+fi
+
+# Start the timer loop in the background
+(
+  sleep_pid=""
+
+  cleanup() {
+    trap - EXIT TERM INT
+    [[ -n "$sleep_pid" ]] && kill "$sleep_pid" 2>/dev/null
+    if [[ -f "$PID_FILE" ]] && [[ "$(<"$PID_FILE")" == "$BASHPID" ]]; then
+      rm -f "$PID_FILE"
+    fi
+    exit 0
+  }
+
+  trap '' HUP
+  trap cleanup EXIT TERM INT
+
+  while true; do
+    notify-send "work"
+    sleep "$WORK_TIME" &
+    sleep_pid=$!
+    wait "$sleep_pid" || break
+
+    notify-send "rest"
+    sleep "$BREAK_TIME" &
+    sleep_pid=$!
+    wait "$sleep_pid" || break
+  done
+) </dev/null >/dev/null 2>&1 &
+
+echo "$!" > "$PID_FILE"
+disown "$!" 2>/dev/null
+
+echo "infpd is started"
+notify-send -t 1000 "infpd is started"
