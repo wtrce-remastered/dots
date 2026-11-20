@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MACHINES_DIR="/var/lib/machines"
+NSPAWN_CONF_DIR="/etc/systemd/nspawn"
+DOTFILES_REPO="https://github.com/wtrce-remastered/dots.git"
+DOTFILES_BRANCH="new"
+
+PACKAGES=(
+    base
+    git
+    vim
+    tmux
+    base-devel
+    wl-clipboard
+    fd
+    sudo
+    ripgrep
+    openssh
+    less
+    fzf
+    unzip
+)
+
+# Re-exec as root if needed
+if [[ $EUID -ne 0 ]]; then
+    exec sudo "$0" "$@"
+fi
+
+# Get container name
+NAME="${1:-}"
+if [[ -z "$NAME" ]]; then
+    read -rp "Container name: " NAME
+fi
+
+if [[ ! "$NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]]; then
+    echo "Error: Invalid container name '$NAME'. Use alphanumeric characters, '.', '_', or '-'." >&2
+    exit 1
+fi
+
+TARGET_DIR="${MACHINES_DIR}/${NAME}"
+CONF_FILE="${NSPAWN_CONF_DIR}/${NAME}.nspawn"
+
+if [[ -e "$TARGET_DIR" ]]; then
+    echo "Error: '$TARGET_DIR' already exists." >&2
+    exit 1
+fi
+
+if [[ -e "$CONF_FILE" ]]; then
+    echo "Error: '$CONF_FILE' already exists." >&2
+    exit 1
+fi
+
+# Verify host dependencies
+for cmd in pacstrap arch-chroot systemd-nspawn; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Error: Missing required command '$cmd' (install arch-install-scripts / systemd)." >&2
+        exit 1
+    fi
+done
+
+mkdir -p "$MACHINES_DIR" "$NSPAWN_CONF_DIR"
+
+# Create container directory (use Btrfs subvolume if /var/lib/machines is on Btrfs)
+FS_TYPE="$(stat -f -c %T "$MACHINES_DIR")"
+if [[ "$FS_TYPE" == "btrfs" ]]; then
+    btrfs subvolume create "$TARGET_DIR"
+else
+    mkdir -p "$TARGET_DIR"
+fi
+
+echo "==> Installing Arch rootfs into $TARGET_DIR..."
+pacstrap -K -c "$TARGET_DIR" "${PACKAGES[@]}"
+
+echo "==> Configuring container system & user 'cn'..."
+arch-chroot "$TARGET_DIR" /bin/bash -euo pipefail <<EOF
+# Locale
+sed -i 's/^#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+# Hostname
+echo "$NAME" > /etc/hostname
+
+# Fix TERM on nspawn console-getty (avoid vt220 fallback)
+mkdir -p /etc/systemd/system/console-getty.service.d
+cat <<'TERMCONF' > /etc/systemd/system/console-getty.service.d/term.conf
+[Service]
+Environment=TERM=xterm-256color
+TERMCONF
+
+# Create privileged non-root user 'cn'
+useradd -m -G wheel -s /bin/bash cn
+echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+chmod 0440 /etc/sudoers.d/wheel
+
+# Clone dotfiles as 'cn'
+su - cn -c "git clone --branch '$DOTFILES_BRANCH' '$DOTFILES_REPO' /home/cn/.d"
+EOF
+
+echo "==> Set password for container user 'cn':"
+arch-chroot "$TARGET_DIR" passwd cn
+
+echo "==> Writing $CONF_FILE..."
+cat <<EOF > "$CONF_FILE"
+[Exec]
+Boot=yes
+PrivateUsers=pick
+Hostname=${NAME}
+ResolvConf=copy-host
+Timezone=copy
+
+[Files]
+PrivateUsersOwnership=auto
+
+[Network]
+VirtualEthernet=no
+EOF
+
+echo
+echo "Done! Container '$NAME' created."
+echo "  Rootfs: $TARGET_DIR"
+echo "  Config: $CONF_FILE"
+echo "  Note:   To install opencode inside it later, run: sudo pacman -S opencode"

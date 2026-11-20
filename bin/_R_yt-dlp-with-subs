@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "Usage: $(basename "$0") <language> <youtu.be/hash> [browser-for-cookies]" >&2
+    exit 1
+fi
+
+LANG_CODE="$1"
+URL="$2"
+BROWSER="${3:-}"
+
+if [[ ! "$URL" =~ ^https?:// ]]; then
+    URL="https://$URL"
+fi
+
+for cmd in yt-dlp ffmpeg; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "Error: '$cmd' is required but not installed." >&2
+        exit 1
+    fi
+done
+
+OUT_DIR="$PWD"
+TMP_DIR="$(mktemp -d "${OUT_DIR}/.yt-dlp-tmp.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+EXTRA_ARGS=()
+if [[ -n "$BROWSER" ]]; then
+    EXTRA_ARGS+=(--cookies-from-browser "$BROWSER")
+fi
+
+download_with_subs() {
+    local sub_lang="$1"
+    shift
+    yt-dlp \
+        --no-playlist \
+        --paths "$TMP_DIR" \
+        --write-subs \
+        --write-auto-subs \
+        --sub-langs "$sub_lang" \
+        --convert-subs srt \
+        --embed-subs \
+        --compat-options no-keep-subs \
+        --merge-output-format mkv \
+        ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
+        "$@" \
+        -- "$URL"
+}
+
+finish_download() {
+    shopt -s nullglob
+    local mkv_files=("$TMP_DIR"/*.mkv)
+    shopt -u nullglob
+
+    if (( ${#mkv_files[@]} == 0 )); then
+        echo "Error: Expected .mkv output was not produced." >&2
+        return 1
+    fi
+
+    mv -- "${mkv_files[@]}" "$OUT_DIR/"
+}
+
+# 1. Try requested language
+if download_with_subs "$LANG_CODE"; then
+    finish_download
+    exit 0
+fi
+
+# 2. Fallback to <lang>-orig if present (common on multi-audio/auto-dubbed videos)
+if [[ "$LANG_CODE" != *-orig ]] && \
+   yt-dlp --no-playlist --list-subs ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} -- "$URL" \
+   | grep -qE "(^|[[:space:]])${LANG_CODE}-orig([[:space:]]|$)"; then
+    echo "Retrying with '${LANG_CODE}-orig'..." >&2
+    if download_with_subs "${LANG_CODE}-orig"; then
+        finish_download
+        exit 0
+    fi
+fi
+
+# 3. Fallback with subtitle delay for YouTube timedtext 429 rate-limiting
+echo "Retrying with 65s subtitle delay to avoid HTTP 429..." >&2
+download_with_subs "$LANG_CODE" --sleep-subtitles 65
+finish_download

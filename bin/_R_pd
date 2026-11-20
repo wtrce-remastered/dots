@@ -1,28 +1,693 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/python3
+import math
+import os
+import re
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import termios
+import time
 
-usage() {
-  echo "Usage: $0 CYCLES WORK_DURATION REST_DURATION" >&2
-  echo "Example: $0 4 45m 5m" >&2
-  exit 2
-}
 
-[[ $# -eq 3 ]] || usage
+# --- Colors ---
 
-cycles=$1
-work_duration=$2
-rest_duration=$3
+def _supports_truecolor() -> bool:
+    return os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit")
 
-[[ $cycles =~ ^[1-9][0-9]*$ ]] || usage
 
-for ((i = 1; i <= cycles; i++)); do
-  notify-send "work"
-  sleep "$work_duration"
+TRUECOLOR = _supports_truecolor()
 
-  if ((i < cycles)); then
-    notify-send "rest"
-    sleep "$rest_duration"
-  else
-    notify-send "done"
-  fi
-done
+if TRUECOLOR:
+    C_ORANGE = "\033[38;2;255;140;0m"
+    C_BLUE = "\033[38;2;70;150;255m"
+    C_GRAY = "\033[38;2;110;110;110m"
+    C_GREEN = "\033[38;2;80;200;120m"
+    C_RED = "\033[38;2;235;85;85m"
+    C_DIM = "\033[38;2;150;150;150m"
+else:
+    C_ORANGE = "\033[38;5;208m"
+    C_BLUE = "\033[38;5;39m"
+    C_GRAY = "\033[38;5;242m"
+    C_GREEN = "\033[38;5;78m"
+    C_RED = "\033[38;5;203m"
+    C_DIM = "\033[38;5;246m"
+
+C_BOLD = "\033[1m"
+C_RESET = "\033[0m"
+
+
+# --- Terminal & Input Helpers ---
+
+class Terminal:
+    def __init__(self) -> None:
+        self.fd = sys.stdin.fileno()
+        self.old_attrs = None
+        self.resized = False
+
+    def __enter__(self) -> "Terminal":
+        self.old_attrs = termios.tcgetattr(self.fd)
+        new_attrs = termios.tcgetattr(self.fd)
+        # Disable IXON/IXOFF so C-q and C-s reach the app; disable ICRNL so C-m/C-j stay distinct
+        new_attrs[0] &= ~(
+            termios.IXON
+            | termios.IXOFF
+            | termios.ICRNL
+            | termios.INLCR
+            | termios.IGNCR
+            | termios.ISTRIP
+        )
+        # Raw-like input without ISIG/ICANON/ECHO/IEXTEN
+        new_attrs[3] &= ~(
+            termios.ECHO
+            | termios.ICANON
+            | termios.IEXTEN
+            | termios.ISIG
+        )
+        new_attrs[6][termios.VMIN] = 1
+        new_attrs[6][termios.VTIME] = 0
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, new_attrs)
+
+        # Enter alternate screen
+        sys.stdout.write("\033[?1049h")
+        sys.stdout.flush()
+
+        signal.signal(signal.SIGWINCH, self._on_resize)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self.old_attrs is not None:
+            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_attrs)
+        # Restore cursor & leave alternate screen
+        sys.stdout.write("\033[?25h\033[0m\033[?1049l")
+        sys.stdout.flush()
+
+    def _on_resize(self, signum, frame) -> None:
+        self.resized = True
+
+    def size(self) -> tuple[int, int]:
+        sz = shutil.get_terminal_size((80, 24))
+        return sz.columns, sz.lines
+
+    def read_key(self, timeout: float | None = None) -> str | None:
+        r, _, _ = select.select([self.fd], [], [], timeout)
+        if not r:
+            return None
+
+        b = os.read(self.fd, 1)
+        if not b:
+            return None
+
+        if b == b"\x1b":
+            # Check for escape sequence (Alt-key, arrows, Home/End/Delete, etc.)
+            r2, _, _ = select.select([self.fd], [], [], 0.025)
+            if not r2:
+                return "ESC"
+
+            b2 = os.read(self.fd, 1)
+            if b2 == b"[":
+                seq = bytearray()
+                while True:
+                    r3, _, _ = select.select([self.fd], [], [], 0.025)
+                    if not r3:
+                        break
+                    c = os.read(self.fd, 1)
+                    seq.extend(c)
+                    if c and (0x40 <= c[0] <= 0x7E):
+                        break
+                code = seq.decode("ascii", errors="ignore")
+                mapping = {
+                    "A": "UP",
+                    "B": "DOWN",
+                    "C": "RIGHT",
+                    "D": "LEFT",
+                    "H": "HOME",
+                    "F": "END",
+                    "1~": "HOME",
+                    "4~": "END",
+                    "3~": "DELETE",
+                    "Z": "SHIFT_TAB",
+                    "1;5C": "CTRL_RIGHT",
+                    "1;5D": "CTRL_LEFT",
+                }
+                return mapping.get(code, f"CSI:{code}")
+            elif b2 == b"O":
+                r3, _, _ = select.select([self.fd], [], [], 0.025)
+                if r3:
+                    c = os.read(self.fd, 1)
+                    if c == b"H":
+                        return "HOME"
+                    if c == b"F":
+                        return "END"
+                return "ESC"
+            elif b2 in (b"\x7f", b"\x08"):
+                return "ALT_BS"
+            else:
+                ch = b2.decode("utf-8", errors="ignore")
+                return f"ALT:{ch}"
+
+        code = b[0]
+        # Handle UTF-8 multi-byte characters
+        if code >= 0xC0:
+            if code < 0xE0:
+                need = 1
+            elif code < 0xF0:
+                need = 2
+            else:
+                need = 3
+            buf = bytearray(b)
+            for _ in range(need):
+                r_utf, _, _ = select.select([self.fd], [], [], 0.02)
+                if r_utf:
+                    buf.extend(os.read(self.fd, 1))
+            return buf.decode("utf-8", errors="replace")
+
+        return b.decode("latin1")
+
+
+# --- Readline / Emacs-style Field Editor ---
+
+class TextField:
+    def __init__(self, label: str, default: str) -> None:
+        self.label = label
+        self.text = default
+        self.cursor = len(default)
+
+    def handle_key(self, key: str, kill_buf: list[str]) -> bool:
+        """Handles editing keys. Returns True if handled."""
+        # Navigation
+        if key in ("\x01", "HOME"):  # C-a
+            self.cursor = 0
+            return True
+        if key in ("\x05", "END"):  # C-e
+            self.cursor = len(self.text)
+            return True
+        if key in ("\x02", "LEFT"):  # C-b
+            if self.cursor > 0:
+                self.cursor -= 1
+            return True
+        if key in ("\x06", "RIGHT"):  # C-f
+            if self.cursor < len(self.text):
+                self.cursor += 1
+            return True
+        if key in ("ALT:b", "CTRL_LEFT"):  # Alt-b
+            self.cursor = self._prev_word_pos()
+            return True
+        if key in ("ALT:f", "CTRL_RIGHT"):  # Alt-f
+            self.cursor = self._next_word_pos()
+            return True
+
+        # Deletion
+        if key in ("\x08", "\x7f"):  # C-h, Backspace
+            if self.cursor > 0:
+                self.text = self.text[: self.cursor - 1] + self.text[self.cursor :]
+                self.cursor -= 1
+            return True
+        if key in ("\x04", "DELETE"):  # C-d, Delete
+            if self.cursor < len(self.text):
+                self.text = self.text[: self.cursor] + self.text[self.cursor + 1 :]
+            return True
+        if key == "\x17":  # C-w (unix-word-rubout: whitespace then non-whitespace)
+            pos = self.cursor
+            while pos > 0 and self.text[pos - 1].isspace():
+                pos -= 1
+            while pos > 0 and not self.text[pos - 1].isspace():
+                pos -= 1
+            if pos < self.cursor:
+                kill_buf[0] = self.text[pos : self.cursor]
+                self.text = self.text[:pos] + self.text[self.cursor :]
+                self.cursor = pos
+            return True
+        if key == "ALT_BS":  # Alt-Backspace (backward-kill-word)
+            pos = self._prev_word_pos()
+            if pos < self.cursor:
+                kill_buf[0] = self.text[pos : self.cursor]
+                self.text = self.text[:pos] + self.text[self.cursor :]
+                self.cursor = pos
+            return True
+        if key == "ALT:d":  # Alt-d (kill-word)
+            pos = self._next_word_pos()
+            if pos > self.cursor:
+                kill_buf[0] = self.text[self.cursor : pos]
+                self.text = self.text[: self.cursor] + self.text[pos:]
+            return True
+        if key == "\x15":  # C-u (unix-line-discard)
+            if self.cursor > 0:
+                kill_buf[0] = self.text[: self.cursor]
+                self.text = self.text[self.cursor :]
+                self.cursor = 0
+            return True
+        if key == "\x0b":  # C-k (kill-line)
+            if self.cursor < len(self.text):
+                kill_buf[0] = self.text[self.cursor :]
+                self.text = self.text[: self.cursor]
+            return True
+        if key == "\x19":  # C-y (yank)
+            if kill_buf[0]:
+                y = kill_buf[0]
+                self.text = self.text[: self.cursor] + y + self.text[self.cursor :]
+                self.cursor += len(y)
+            return True
+        if key == "\x14":  # C-t (transpose-chars)
+            if self.cursor > 0 and len(self.text) >= 2:
+                idx = self.cursor if self.cursor < len(self.text) else self.cursor - 1
+                if idx > 0:
+                    chars = list(self.text)
+                    chars[idx - 1], chars[idx] = chars[idx], chars[idx - 1]
+                    self.text = "".join(chars)
+                    self.cursor = min(len(self.text), idx + 1)
+            return True
+
+        # Printable character insertion
+        if len(key) == 1 and key.isprintable():
+            self.text = self.text[: self.cursor] + key + self.text[self.cursor :]
+            self.cursor += 1
+            return True
+
+        return False
+
+    def _prev_word_pos(self) -> int:
+        pos = self.cursor
+        while pos > 0 and not self.text[pos - 1].isalnum():
+            pos -= 1
+        while pos > 0 and self.text[pos - 1].isalnum():
+            pos -= 1
+        return pos
+
+    def _next_word_pos(self) -> int:
+        pos = self.cursor
+        n = len(self.text)
+        while pos < n and not self.text[pos].isalnum():
+            pos += 1
+        while pos < n and self.text[pos].isalnum():
+            pos += 1
+        return pos
+
+
+# --- Parsing & Notifications ---
+
+_DURATION_PART_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])", re.IGNORECASE)
+
+
+def parse_duration(raw: str) -> float:
+    s = raw.strip()
+    if not s:
+        raise ValueError("duration cannot be empty")
+
+    # Plain number -> minutes
+    try:
+        mins = float(s)
+        secs = mins * 60.0
+        if secs <= 0 or math.isnan(secs) or math.isinf(secs):
+            raise ValueError("duration must be > 0")
+        return secs
+    except ValueError:
+        pass
+
+    pos = 0
+    total = 0.0
+    for m in _DURATION_PART_RE.finditer(s):
+        if s[pos : m.start()].strip():
+            raise ValueError(f"invalid duration: {raw}")
+        val = float(m.group(1))
+        unit = m.group(2).lower()
+        mult = {"h": 3600.0, "m": 60.0, "s": 1.0}[unit]
+        total += val * mult
+        pos = m.end()
+
+    if pos == 0 or s[pos:].strip():
+        raise ValueError(f"invalid duration: {raw}")
+    if total <= 0 or math.isnan(total) or math.isinf(total):
+        raise ValueError("duration must be > 0")
+    return total
+
+
+def parse_sets(raw: str) -> int:
+    s = raw.strip()
+    if not s:
+        raise ValueError("sets cannot be empty")
+    val = int(s)
+    if val < 1:
+        raise ValueError("sets must be >= 1")
+    return val
+
+
+def format_mmss(seconds: float) -> str:
+    sec = max(0, math.ceil(seconds))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
+
+def notify(message: str) -> None:
+    try:
+        subprocess.Popen(
+            ["notify-send", message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        pass
+
+
+# --- Config Phase ---
+
+def run_config(term: Terminal) -> tuple[float, float, int] | None:
+    fields = [
+        TextField("Work time ", "45m"),
+        TextField("Break time", "5m"),
+        TextField("Sets      ", "4"),
+    ]
+    focus = 0
+    kill_buf = [""]
+    error_msg = ""
+
+    def render() -> None:
+        cols, rows = term.size()
+        buf = ["\033[2J"]  # clear screen
+
+        # Center vertically & horizontally
+        block_height = 7
+        start_row = max(1, (rows - block_height) // 2 + 1)
+        form_width = 34
+        start_col = max(1, (cols - form_width) // 2 + 1)
+
+        title = f"{C_BOLD}Pomodoro Setup{C_RESET}"
+        buf.append(f"\033[{start_row};{start_col}H{title}")
+
+        cursor_row = start_row + 2 + focus
+        cursor_col = start_col + 15 + fields[focus].cursor
+
+        for idx, f in enumerate(fields):
+            r = start_row + 2 + idx
+            if idx == focus:
+                pointer = f"{C_ORANGE}{C_BOLD}>{C_RESET}"
+                label = f"{C_BOLD}{f.label}{C_RESET}"
+            else:
+                pointer = " "
+                label = f"{C_DIM}{f.label}{C_RESET}"
+            line = f"{pointer} {label} : {f.text}"
+            buf.append(f"\033[{r};{start_col}H{line}")
+
+        if error_msg:
+            err_row = start_row + 6
+            buf.append(f"\033[{err_row};{start_col}H{C_RED}{error_msg[:cols - start_col]}{C_RESET}")
+        else:
+            hint_row = start_row + 6
+            hint = "C-n/C-p: move  Enter/C-j/C-m: next/start  C-q: quit"
+            hint_col = max(1, (cols - len(hint)) // 2 + 1)
+            buf.append(f"\033[{hint_row};{hint_col}H{C_DIM}{hint}{C_RESET}")
+
+        # Show cursor at active field position
+        cursor_col = min(cols, cursor_col)
+        buf.append(f"\033[?25h\033[{cursor_row};{cursor_col}H")
+
+        sys.stdout.write("".join(buf))
+        sys.stdout.flush()
+
+    render()
+
+    while True:
+        if term.resized:
+            term.resized = False
+            render()
+
+        key = term.read_key(timeout=0.1)
+        if key is None:
+            continue
+
+        if key in ("\x11", "\x03"):  # C-q or C-c
+            return None
+
+        if key == "\x0c":  # C-l
+            render()
+            continue
+
+        if key in ("\x0e", "DOWN", "\t"):  # C-n, Down, Tab
+            focus = min(len(fields) - 1, focus + 1)
+            error_msg = ""
+            render()
+            continue
+
+        if key in ("\x10", "UP", "SHIFT_TAB"):  # C-p, Up, Shift-Tab
+            focus = max(0, focus - 1)
+            error_msg = ""
+            render()
+            continue
+
+        if key in ("\r", "\n"):  # Enter / C-m / C-j
+            if focus < len(fields) - 1:
+                focus += 1
+                error_msg = ""
+                render()
+                continue
+            # Last field: validate and start
+            try:
+                work_sec = parse_duration(fields[0].text)
+            except ValueError as e:
+                focus = 0
+                error_msg = f"Work time: {e}"
+                render()
+                continue
+            try:
+                break_sec = parse_duration(fields[1].text)
+            except ValueError as e:
+                focus = 1
+                error_msg = f"Break time: {e}"
+                render()
+                continue
+            try:
+                sets = parse_sets(fields[2].text)
+            except ValueError as e:
+                focus = 2
+                error_msg = f"Sets: {e}"
+                render()
+                continue
+            return work_sec, break_sec, sets
+
+        if fields[focus].handle_key(key, kill_buf):
+            error_msg = ""
+            render()
+
+
+# --- Timer Phase ---
+
+def build_segments(work_sec: float, break_sec: float, sets: int) -> list[tuple[str, float, int]]:
+    """Returns list of (kind, duration, set_number). Last set has no break."""
+    segs: list[tuple[str, float, int]] = []
+    for s in range(1, sets + 1):
+        segs.append(("work", work_sec, s))
+        if s < sets:
+            segs.append(("break", break_sec, s))
+    return segs
+
+
+def compute_segment_widths(
+    segments: list[tuple[str, float, int]],
+    work_sec: float,
+    break_sec: float,
+    sets: int,
+    cols: int,
+) -> list[int]:
+    num_segs = len(segments)
+    num_dots = num_segs - 1
+    max_total_bar = max(10, min(cols - 6, 92))
+    avail_hashes = max(num_segs, max_total_bar - 2 - num_dots)
+
+    if sets == 1:
+        return [avail_hashes]
+
+    total_sec = sets * work_sec + (sets - 1) * break_sec
+    w_work = max(1, round(avail_hashes * work_sec / total_sec))
+    w_break = max(1, round(avail_hashes * break_sec / total_sec))
+
+    # Shrink if rounding exceeded available space while keeping symmetry & >= 1 char each
+    while sets * w_work + (sets - 1) * w_break > avail_hashes:
+        if w_work > 1 and (w_work / work_sec >= w_break / break_sec or w_break == 1):
+            w_work -= 1
+        elif w_break > 1:
+            w_break -= 1
+        else:
+            break
+
+    return [w_work if kind == "work" else w_break for kind, _, _ in segments]
+
+
+def segment_at(segments: list[tuple[str, float, int]], elapsed: float) -> tuple[int, float]:
+    """Returns (segment_index, elapsed_within_segment)."""
+    acc = 0.0
+    for idx, (_, dur, _) in enumerate(segments):
+        if elapsed < acc + dur:
+            return idx, max(0.0, elapsed - acc)
+        acc += dur
+    last = len(segments) - 1
+    return last, segments[last][1]
+
+
+def run_timer(term: Terminal, work_sec: float, break_sec: float, sets: int) -> None:
+    segments = build_segments(work_sec, break_sec, sets)
+    total_duration = sum(dur for _, dur, _ in segments)
+
+    accumulated = 0.0
+    run_start: float | None = None
+    done = False
+    last_seg_idx = 0
+
+    def current_elapsed() -> float:
+        if run_start is None:
+            return accumulated
+        return min(total_duration, accumulated + (time.monotonic() - run_start))
+
+    def render() -> None:
+        cols, rows = term.size()
+        elapsed = current_elapsed()
+        seg_idx, seg_elapsed = segment_at(segments, elapsed)
+        kind, seg_dur, set_num = segments[seg_idx]
+
+        # Build the [###·##·###] progress bar
+        widths = compute_segment_widths(segments, work_sec, break_sec, sets, cols)
+        bar_parts = [f"{C_DIM}[{C_RESET}"]
+        visible_bar_len = 2 + sum(widths) + (len(segments) - 1)
+
+        seg_offset = 0.0
+        for i, ((s_kind, s_dur, _), w) in enumerate(zip(segments, widths)):
+            if i > 0:
+                bar_parts.append(f"{C_GRAY}·{C_RESET}")
+
+            s_el = min(s_dur, max(0.0, elapsed - seg_offset))
+            if s_el >= s_dur:
+                filled = w
+            else:
+                filled = min(w, int((s_el / s_dur) * w))
+            unfilled = w - filled
+
+            color = C_ORANGE if s_kind == "work" else C_BLUE
+            if filled > 0:
+                bar_parts.append(f"{color}{'#' * filled}{C_RESET}")
+            if unfilled > 0:
+                bar_parts.append(f"{C_GRAY}{'#' * unfilled}{C_RESET}")
+
+            seg_offset += s_dur
+
+        bar_parts.append(f"{C_DIM}]{C_RESET}")
+        bar_str = "".join(bar_parts)
+
+        # Status line
+        if done:
+            phase_badge = f"{C_GREEN}{C_BOLD}DONE{C_RESET}"
+            phase_plain = "DONE"
+            state_badge = ""
+            state_plain = ""
+            rem_str = "00:00"
+        else:
+            if kind == "work":
+                phase_badge = f"{C_ORANGE}{C_BOLD}WORK{C_RESET}"
+                phase_plain = "WORK"
+            else:
+                phase_badge = f"{C_BLUE}{C_BOLD}BREAK{C_RESET}"
+                phase_plain = "BREAK"
+            if run_start is None:
+                state_badge = f"  {C_DIM}PAUSED{C_RESET}"
+                state_plain = "  PAUSED"
+            else:
+                state_badge = ""
+                state_plain = ""
+            rem_str = format_mmss(seg_dur - seg_elapsed)
+
+        set_plain = f"Set {set_num}/{sets}"
+        status_plain = f"{phase_plain}  •  {set_plain}{state_plain}"
+        status_line = f"{phase_badge}  {C_DIM}•{C_RESET}  {set_plain}{state_badge}"
+
+        time_plain = f"{rem_str}  ({format_mmss(elapsed)} / {format_mmss(total_duration)})"
+        time_line = f"{C_BOLD}{rem_str}{C_RESET}  {C_DIM}({format_mmss(elapsed)} / {format_mmss(total_duration)}){C_RESET}"
+
+        hint_plain = "C-q: quit" if done else "C-p: start/pause   C-q: quit"
+        hint_line = f"{C_DIM}{hint_plain}{C_RESET}"
+
+        # Center vertically
+        block_h = 6
+        top_row = max(1, (rows - block_h) // 2 + 1)
+
+        def center_col(plain_len: int) -> int:
+            return max(1, (cols - plain_len) // 2 + 1)
+
+        out = ["\033[?25l\033[2J"]
+        out.append(f"\033[{top_row};{center_col(len(status_plain))}H{status_line}")
+        out.append(f"\033[{top_row + 1};{center_col(len(time_plain))}H{time_line}")
+        out.append(f"\033[{top_row + 3};{center_col(visible_bar_len)}H{bar_str}")
+        out.append(f"\033[{top_row + 5};{center_col(len(hint_plain))}H{hint_line}")
+
+        sys.stdout.write("".join(out))
+        sys.stdout.flush()
+
+    render()
+
+    while True:
+        # Tick faster while running for smooth updates
+        timeout = 0.1 if run_start is not None else 0.25
+        key = term.read_key(timeout=timeout)
+
+        now_elapsed = current_elapsed()
+
+        # Check phase transitions & completion
+        if not done and run_start is not None:
+            if now_elapsed >= total_duration:
+                accumulated = total_duration
+                run_start = None
+                done = True
+                notify("done")
+                render()
+            else:
+                cur_idx, _ = segment_at(segments, now_elapsed)
+                if cur_idx != last_seg_idx:
+                    last_seg_idx = cur_idx
+                    next_kind = segments[cur_idx][0]
+                    notify(next_kind)
+                    render()
+
+        if term.resized:
+            term.resized = False
+            render()
+
+        if key is None:
+            if run_start is not None:
+                render()
+            continue
+
+        if key in ("\x11", "\x03"):  # C-q or C-c
+            return
+
+        if key == "\x0c":  # C-l
+            render()
+            continue
+
+        if key == "\x10" and not done:  # C-p: toggle pause/unpause
+            if run_start is None:
+                run_start = time.monotonic()
+            else:
+                accumulated = min(total_duration, accumulated + (time.monotonic() - run_start))
+                run_start = None
+            render()
+
+
+def main() -> int:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        sys.stderr.write("Error: interactive TTY required.\n")
+        return 1
+
+    with Terminal() as term:
+        cfg = run_config(term)
+        if cfg is None:
+            return 0
+        work_sec, break_sec, sets = cfg
+        run_timer(term, work_sec, break_sec, sets)
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MACHINES_DIR="/var/lib/machines"
+
+if ! command -v fzf &>/dev/null; then
+    echo "Error: 'fzf' is not installed." >&2
+    exit 1
+fi
+
+# List container directories (use sudo only if /var/lib/machines isn't readable)
+if [[ -r "$MACHINES_DIR" ]]; then
+    mapfile -t CONTAINERS < <(find "$MACHINES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+else
+    mapfile -t CONTAINERS < <(sudo find "$MACHINES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+fi
+
+if [[ ${#CONTAINERS[@]} -eq 0 ]]; then
+    echo "No containers found in $MACHINES_DIR." >&2
+    exit 1
+fi
+
+SELECTED="$(printf '%s\n' "${CONTAINERS[@]}" | fzf --prompt="remove nspawn > " --height=40% --reverse)" || exit 0
+[[ -z "$SELECTED" ]] && exit 0
+
+# Sanity check before destructive operations
+if [[ "$SELECTED" == "." || "$SELECTED" == ".." || "$SELECTED" == */* ]]; then
+    echo "Error: Invalid container name '$SELECTED'." >&2
+    exit 1
+fi
+
+TARGET_DIR="${MACHINES_DIR}/${SELECTED}"
+
+STATUS=""
+if machinectl show "$SELECTED" &>/dev/null; then
+    STATUS=" (RUNNING - will be terminated)"
+fi
+
+read -rp "Permanently delete '${TARGET_DIR}'${STATUS}? [y/N] " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 0
+fi
+
+# Terminate the container first if it is currently running
+if machinectl show "$SELECTED" &>/dev/null; then
+    echo "==> Terminating running container '$SELECTED'..."
+    sudo machinectl terminate "$SELECTED"
+
+    for _ in {1..30}; do
+        machinectl show "$SELECTED" &>/dev/null || break
+        sleep 0.2
+    done
+
+    if machinectl show "$SELECTED" &>/dev/null; then
+        echo "Error: Container '$SELECTED' did not stop in time." >&2
+        exit 1
+    fi
+fi
+
+# Remove using machinectl first (handles nested Btrfs subvolumes cleanly),
+# falling back to rm -rf if needed.
+echo "==> Removing '$TARGET_DIR'..."
+if ! sudo machinectl remove "$SELECTED" 2>/dev/null; then
+    sudo rm -rf -- "$TARGET_DIR"
+fi
+
+if [[ -e "$TARGET_DIR" ]]; then
+    echo "Error: Failed to remove '$TARGET_DIR'." >&2
+    exit 1
+fi
+
+echo "==> Removed '$SELECTED'."

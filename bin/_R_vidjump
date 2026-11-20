@@ -1,0 +1,762 @@
+#!/usr/bin/env python3
+"""vidjump - Rapidly jump between AI-extracted video timecodes via fzf and mpv."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import re
+import shlex
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import textwrap
+import threading
+import time
+
+VIDEO_EXTS = {
+    ".webm",
+    ".mp4",
+    ".mkv",
+    ".mov",
+    ".avi",
+    ".m4v",
+    ".ts",
+    ".flv",
+    ".mpg",
+    ".mpeg",
+}
+TRANSCRIPT_EXTS = {".srt", ".vtt", ".ass", ".ssa", ".sub", ".txt", ".md", ".json"}
+
+Q_COLORS = (
+    "1;33",  # bold yellow
+    "1;35",  # bold magenta
+    "1;34",  # bold blue
+    "1;32",  # bold green
+    "1;93",  # bold bright yellow
+    "1;95",  # bold bright magenta
+    "1;94",  # bold bright blue
+    "1;92",  # bold bright green
+)
+
+V_COLORS = (
+    "1;32",  # bold green
+    "1;96",  # bold bright cyan
+    "1;91",  # bold bright red
+    "1;34",  # bold blue
+    "1;92",  # bold bright green
+    "1;35",  # bold magenta
+    "1;33",  # bold yellow
+    "1;94",  # bold bright blue
+)
+
+HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+ITEM_RE = re.compile(
+    r"^\s*[-*]\s*`?\[([^\]]+)\]`?\s*\|\s*`(.+?)`\s*\|\s*(.+?)\s*$"
+)
+TIME_RANGE_RE = re.compile(
+    r"^\s*(\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d+)?)\s*[-–—]\s*"
+    r"(\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d+)?)\s*$"
+)
+LANG_SUFFIX_RE = re.compile(r"\.[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})?$")
+BRACKET_ID_RE = re.compile(r"\[([A-Za-z0-9_-]{5,})\]")
+
+
+@dataclass
+class Segment:
+    idx: int
+    question_num: int
+    question: str
+    start_sec: float
+    end_sec: float
+    start_str: str
+    end_str: str
+    resource_name: str
+    description: str
+    video_path: Path | None = None
+    video_num: int = 0
+
+    @property
+    def time_range(self) -> str:
+        return f"{self.start_str}-{self.end_str}"
+
+    @property
+    def display_video_name(self) -> str:
+        if self.video_path is not None:
+            return self.video_path.name
+        return self.resource_name
+
+
+def parse_timestamp(raw: str) -> float:
+    cleaned = raw.strip().replace(",", ".")
+    parts = cleaned.split(":")
+    if len(parts) == 2:
+        minutes, seconds = int(parts[0]), float(parts[1])
+        return minutes * 60.0 + seconds
+    if len(parts) == 3:
+        hours, minutes, seconds = int(parts[0]), int(parts[1]), float(parts[2])
+        return hours * 3600.0 + minutes * 60.0 + seconds
+    raise ValueError(f"Unsupported timestamp format: {raw!r}")
+
+
+def format_timestamp(seconds: float) -> str:
+    total = max(0, int(round(seconds)))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def parse_markdown(md_path: Path) -> list[Segment]:
+    segments: list[Segment] = []
+    current_question = "General"
+    question_num = 0
+    seen_heading_for_items = False
+
+    with md_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.rstrip("\r\n")
+
+            h_match = HEADING_RE.match(line)
+            if h_match:
+                current_question = h_match.group(1).strip()
+                seen_heading_for_items = False
+                continue
+
+            i_match = ITEM_RE.match(line)
+            if not i_match:
+                continue
+
+            raw_range, resource_name, description = i_match.groups()
+            t_match = TIME_RANGE_RE.match(raw_range)
+            if not t_match:
+                continue
+
+            start_raw, end_raw = t_match.groups()
+            start_sec = parse_timestamp(start_raw)
+            end_sec = parse_timestamp(end_raw)
+
+            if not seen_heading_for_items:
+                question_num += 1
+                seen_heading_for_items = True
+
+            segments.append(
+                Segment(
+                    idx=len(segments),
+                    question_num=question_num,
+                    question=current_question,
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    start_str=format_timestamp(start_sec),
+                    end_str=format_timestamp(end_sec),
+                    resource_name=resource_name.strip(),
+                    description=description.strip(),
+                )
+            )
+
+    return segments
+
+
+def strip_transcript_suffixes(filename: str) -> str:
+    p = Path(filename)
+    name = p.name
+    if p.suffix.lower() in TRANSCRIPT_EXTS or p.suffix.lower() in VIDEO_EXTS:
+        name = p.stem
+    return LANG_SUFFIX_RE.sub("", name)
+
+
+def normalize_for_fuzzy(text: str) -> str:
+    return re.sub(r"\s+", " ", text.replace("⧸", "/")).strip().casefold()
+
+
+def resolve_videos(segments: list[Segment], resources_dir: Path) -> list[str]:
+    if not resources_dir.exists():
+        return [f"Resources directory does not exist: {resources_dir}"]
+
+    video_files = sorted(
+        p.resolve()
+        for p in resources_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+    )
+
+    by_exact_name: dict[str, Path] = {}
+    by_stem: dict[str, Path] = {}
+    by_bracket_id: dict[str, Path] = {}
+    by_norm_stem: dict[str, Path] = {}
+
+    for vp in video_files:
+        by_exact_name.setdefault(vp.name, vp)
+        by_stem.setdefault(vp.stem, vp)
+        by_norm_stem.setdefault(normalize_for_fuzzy(vp.stem), vp)
+        ids = BRACKET_ID_RE.findall(vp.stem)
+        if ids:
+            by_bracket_id.setdefault(ids[-1], vp)
+
+    warnings: list[str] = []
+    missing_seen: set[str] = set()
+
+    for seg in segments:
+        res_name = Path(seg.resource_name).name
+
+        # 1. Exact video filename match
+        if res_name in by_exact_name:
+            seg.video_path = by_exact_name[res_name]
+            continue
+
+        # 2. Exact stem match after stripping .ru.srt / .vtt / .txt etc.
+        target_stem = strip_transcript_suffixes(res_name)
+        if target_stem in by_stem:
+            seg.video_path = by_stem[target_stem]
+            continue
+
+        # 3. Match by yt-dlp [video_id]
+        ids = BRACKET_ID_RE.findall(target_stem)
+        if ids and ids[-1] in by_bracket_id:
+            seg.video_path = by_bracket_id[ids[-1]]
+            continue
+
+        # 4. Fuzzy normalized stem fallback
+        norm = normalize_for_fuzzy(target_stem)
+        if norm in by_norm_stem:
+            seg.video_path = by_norm_stem[norm]
+            continue
+
+        if seg.resource_name not in missing_seen:
+            missing_seen.add(seg.resource_name)
+            warnings.append(f"Missing video for resource: {seg.resource_name}")
+
+    return warnings
+
+
+def assign_video_numbers(segments: list[Segment]) -> None:
+    video_ids: dict[str, int] = {}
+    for seg in segments:
+        if seg.video_path is not None:
+            key = str(seg.video_path)
+        else:
+            key = f"missing:{strip_transcript_suffixes(Path(seg.resource_name).name)}"
+        if key not in video_ids:
+            video_ids[key] = len(video_ids) + 1
+        seg.video_num = video_ids[key]
+
+
+class MpvController:
+    def __init__(self, mpv_sock: Path, auto_pause: bool = True, keep_mpv: bool = False):
+        self.mpv_sock = mpv_sock
+        self.auto_pause = auto_pause
+        self.keep_mpv = keep_mpv
+
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._sock: socket.socket | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._stop_reader = threading.Event()
+
+        self._send_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._action_lock = threading.Lock()
+        self._file_loaded_event = threading.Event()
+
+        self._current_path: str | None = None
+        self._active_segment: Segment | None = None
+        self._armed = False
+        self._paused = False
+
+    def ensure_started(self) -> None:
+        if self._proc is not None and self._proc.poll() is None and self._sock is not None:
+            return
+
+        self._close_socket()
+        if self.mpv_sock.exists():
+            try:
+                self.mpv_sock.unlink()
+            except OSError:
+                pass
+
+        cmd = [
+            "mpv",
+            "--idle=yes",
+            "--keep-open=yes",
+            "--no-resume-playback",
+            "--input-terminal=no",
+            f"--input-ipc-server={self.mpv_sock}",
+        ]
+        self._proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if self._proc.poll() is not None:
+                raise RuntimeError("mpv exited unexpectedly during startup.")
+            if self.mpv_sock.exists():
+                try:
+                    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    sock.connect(str(self.mpv_sock))
+                    sock.settimeout(0.5)
+                    self._sock = sock
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            else:
+                time.sleep(0.05)
+
+        if self._sock is None:
+            raise RuntimeError("Timed out waiting for mpv IPC socket.")
+
+        with self._state_lock:
+            self._current_path = None
+            self._armed = False
+
+        self._stop_reader.clear()
+        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader_thread.start()
+
+        self._send_cmd(["observe_property", 1, "time-pos"])
+        self._send_cmd(["observe_property", 2, "path"])
+        self._send_cmd(["observe_property", 3, "pause"])
+
+    def _close_socket(self) -> None:
+        self._stop_reader.set()
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+            self._sock = None
+
+    def _send_cmd(self, command: list[object]) -> None:
+        payload = (json.dumps({"command": command}) + "\n").encode("utf-8")
+        with self._send_lock:
+            if self._sock is None:
+                return
+            try:
+                self._sock.sendall(payload)
+            except OSError:
+                self._close_socket()
+
+    def _reader_loop(self) -> None:
+        buf = b""
+        while not self._stop_reader.is_set():
+            sock = self._sock
+            if sock is None:
+                break
+            try:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            if not chunk:
+                break
+
+            buf += chunk
+            while b"\n" in buf:
+                raw_line, buf = buf.split(b"\n", 1)
+                if not raw_line.strip():
+                    continue
+                try:
+                    msg = json.loads(raw_line.decode("utf-8", errors="replace"))
+                except json.JSONDecodeError:
+                    continue
+                self._handle_mpv_message(msg)
+
+    def _handle_mpv_message(self, msg: dict[str, object]) -> None:
+        event = msg.get("event")
+        if event == "file-loaded":
+            self._file_loaded_event.set()
+            return
+
+        if event == "end-file":
+            with self._state_lock:
+                self._armed = False
+            return
+
+        if event != "property-change":
+            return
+
+        name = msg.get("name")
+        data = msg.get("data")
+
+        if name == "path":
+            with self._state_lock:
+                self._current_path = str(data) if data is not None else None
+        elif name == "pause":
+            with self._state_lock:
+                self._paused = bool(data)
+        elif name == "time-pos" and isinstance(data, (int, float)):
+            self._on_time_pos(float(data))
+
+    def _on_time_pos(self, pos: float) -> None:
+        should_pause = False
+        end_str = ""
+
+        with self._state_lock:
+            seg = self._active_segment
+            if seg is None or seg.end_sec <= seg.start_sec:
+                return
+
+            if not self._armed:
+                if (seg.start_sec - 5.0) <= pos < (seg.end_sec - 0.15):
+                    self._armed = True
+                return
+
+            if self.auto_pause and pos >= seg.end_sec:
+                self._armed = False
+                should_pause = True
+                end_str = seg.end_str
+
+        if should_pause:
+            self._send_cmd(["set_property", "pause", True])
+            self.show_text(f"Segment ended [{end_str}]", 2500)
+
+    def show_text(self, text: str, duration_ms: int = 2000) -> None:
+        self._send_cmd(["show-text", text, duration_ms])
+
+    def jump(self, seg: Segment) -> None:
+        with self._action_lock:
+            self.ensure_started()
+            if seg.video_path is None:
+                self.show_text(f"Missing video: {seg.resource_name}", 3000)
+                return
+
+            target = str(seg.video_path.resolve())
+            with self._state_lock:
+                same_file = self._current_path == target
+                self._active_segment = seg
+                self._armed = False
+
+            if not same_file:
+                self._file_loaded_event.clear()
+                self._send_cmd(["set_property", "pause", True])
+                self._send_cmd(["loadfile", target, "replace"])
+                if not self._file_loaded_event.wait(timeout=5.0):
+                    time.sleep(0.2)
+
+            self._send_cmd(["seek", seg.start_sec, "absolute+exact"])
+            self._send_cmd(["set_property", "pause", False])
+
+            self.show_text(f"[Q{seg.question_num} V{seg.video_num}] {seg.time_range}", 2000)
+
+    def replay(self) -> None:
+        with self._state_lock:
+            seg = self._active_segment
+        if seg is None:
+            self.show_text("No active segment", 1500)
+            return
+        self.jump(seg)
+
+    def toggle_pause(self) -> None:
+        with self._action_lock:
+            self.ensure_started()
+            self._send_cmd(["cycle", "pause"])
+            with self._state_lock:
+                next_state = "Paused" if not self._paused else "Playing"
+            self.show_text(next_state, 1200)
+
+    def toggle_autopause(self) -> None:
+        with self._action_lock:
+            self.ensure_started()
+            with self._state_lock:
+                self.auto_pause = not self.auto_pause
+                enabled = self.auto_pause
+            self.show_text(f"Auto-pause: {'ON' if enabled else 'OFF'}", 1500)
+
+    def shutdown(self) -> None:
+        if self.keep_mpv:
+            self._close_socket()
+            return
+
+        if self._proc is not None and self._proc.poll() is None:
+            self._send_cmd(["quit"])
+            try:
+                self._proc.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                self._proc.terminate()
+                try:
+                    self._proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    self._proc.kill()
+        self._close_socket()
+
+
+class ControlServer:
+    def __init__(self, sock_path: Path, segments: list[Segment], mpv: MpvController):
+        self.sock_path = sock_path
+        self.segments = segments
+        self.mpv = mpv
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._server_sock: socket.socket | None = None
+
+    def start(self) -> None:
+        if self.sock_path.exists():
+            self.sock_path.unlink()
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(str(self.sock_path))
+        srv.listen(16)
+        srv.settimeout(0.3)
+        self._server_sock = srv
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        assert self._server_sock is not None
+        while not self._stop_event.is_set():
+            try:
+                conn, _ = self._server_sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            try:
+                data = conn.recv(4096).decode("utf-8", errors="replace").strip()
+            except OSError:
+                data = ""
+            finally:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+
+            if data:
+                self._dispatch(data)
+
+    def _dispatch(self, cmdline: str) -> None:
+        parts = cmdline.split(maxsplit=1)
+        action = parts[0]
+        try:
+            if action == "jump" and len(parts) == 2:
+                idx = int(parts[1])
+                if 0 <= idx < len(self.segments):
+                    self.mpv.jump(self.segments[idx])
+            elif action == "pause":
+                self.mpv.toggle_pause()
+            elif action == "replay":
+                self.mpv.replay()
+            elif action == "autopause":
+                self.mpv.toggle_autopause()
+        except Exception:
+            pass
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._server_sock is not None:
+            try:
+                self._server_sock.close()
+            except OSError:
+                pass
+            self._server_sock = None
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+
+def send_ctl_command(sock_path: Path, args: list[str]) -> int:
+    payload = " ".join(args).encode("utf-8")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2.0)
+            s.connect(str(sock_path))
+            s.sendall(payload)
+        return 0
+    except OSError as exc:
+        print(f"vidjump ctl error: {exc}", file=sys.stderr)
+        return 1
+
+
+def format_kv(label: str, color_code: str, value: str, width: int) -> list[str]:
+    prefix = f"{label:<10}"
+    body_width = max(16, width - len(prefix) - 2)
+    wrapped = textwrap.wrap(
+        value,
+        width=body_width,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [""]
+    lines = [f"\033[{color_code}m{prefix}\033[0m{wrapped[0]}"]
+    indent = " " * len(prefix)
+    for cont in wrapped[1:]:
+        lines.append(f"{indent}{cont}")
+    return lines
+
+
+def print_preview(cols_raw: str, question: str, video: str, trange: str, desc: str) -> int:
+    width = int(cols_raw) if cols_raw.isdigit() else 80
+    lines: list[str] = []
+    lines.extend(format_kv("Question:", "1;33", question, width))
+    lines.extend(format_kv("Video:", "1;32", video, width))
+    lines.extend(format_kv("Segment:", "1;36", trange, width))
+    lines.append("")
+    lines.extend(format_kv("Desc:", "1;37", desc, width))
+    print("\n".join(lines))
+    return 0
+
+
+def sanitize_field(text: str) -> str:
+    return text.replace("\t", " ").replace("\r", " ").replace("\n", " ").strip()
+
+
+def build_fzf_input(segments: list[Segment]) -> str:
+    q_width = max((len(f"Q{s.question_num}") for s in segments), default=2)
+    v_width = max((len(f"V{s.video_num}") for s in segments), default=2)
+
+    lines: list[str] = []
+    for seg in segments:
+        q_label = f"Q{seg.question_num}".ljust(q_width)
+        v_label = f"V{seg.video_num}".ljust(v_width)
+        q_color = Q_COLORS[(seg.question_num - 1) % len(Q_COLORS)]
+        v_color = V_COLORS[(seg.video_num - 1) % len(V_COLORS)]
+
+        vid_name = sanitize_field(seg.display_video_name)
+        q_text = sanitize_field(seg.question)
+        desc = sanitize_field(seg.description)
+        trange = seg.time_range
+
+        missing_tag = "" if seg.video_path is not None else " \033[1;31m[MISSING]\033[0m"
+        display = (
+            f"\033[36m[{trange}]\033[0m "
+            f"\033[{q_color}m{q_label}\033[0m "
+            f"\033[{v_color}m{v_label}\033[0m"
+            f"{missing_tag} "
+            f"{desc} "
+            f"\033[2m({vid_name})\033[0m"
+        )
+        lines.append(f"{seg.idx}\t{display}\t{q_text}\t{vid_name}\t{trange}\t{desc}")
+    return "\n".join(lines) + "\n"
+
+
+def run_fzf(segments: list[Segment], ctl_sock: Path) -> int:
+    exe = shlex.quote(sys.executable)
+    script = shlex.quote(str(Path(__file__).resolve()))
+    ctl = shlex.quote(str(ctl_sock))
+
+    preview_cmd = f'{exe} {script} --preview "$FZF_PREVIEW_COLUMNS" {{3}} {{4}} {{5}} {{6}}'
+
+    header = (
+        "Enter: Play segment | Ctrl-K: Pause/Play | "
+        "Ctrl-R: Replay | Ctrl-A: Auto-pause | Esc: Quit"
+    )
+
+    cmd = [
+        "fzf",
+        "--ansi",
+        "--layout=reverse",
+        "--delimiter=\t",
+        "--with-nth=2",
+        f"--header={header}",
+        f"--preview={preview_cmd}",
+        "--preview-window=down:40%:wrap",
+        "--bind=ctrl-p:up",
+        f"--bind=enter:execute-silent({exe} {script} --ctl {ctl} jump {{1}})",
+        f"--bind=double-click:execute-silent({exe} {script} --ctl {ctl} jump {{1}})",
+        f"--bind=ctrl-k:execute-silent({exe} {script} --ctl {ctl} pause)",
+        f"--bind=ctrl-r:execute-silent({exe} {script} --ctl {ctl} replay)",
+        f"--bind=ctrl-a:execute-silent({exe} {script} --ctl {ctl} autopause)",
+    ]
+
+    fzf_input = build_fzf_input(segments)
+    proc = subprocess.run(cmd, input=fzf_input, text=True)
+    return 0 if proc.returncode in (0, 1, 130) else proc.returncode
+
+
+def main() -> int:
+    # Fast-path internal modes triggered by fzf bindings/preview
+    if len(sys.argv) >= 4 and sys.argv[1] == "--ctl":
+        return send_ctl_command(Path(sys.argv[2]), sys.argv[3:])
+
+    if len(sys.argv) >= 7 and sys.argv[1] == "--preview":
+        return print_preview(
+            sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]
+        )
+
+    parser = argparse.ArgumentParser(
+        description="Jump between AI-extracted video timecodes via fzf + mpv."
+    )
+    parser.add_argument("notes", help="Markdown file with timecodes")
+    parser.add_argument(
+        "-r",
+        "--resources",
+        default="./resources",
+        help="Directory containing video and transcript files (default: ./resources)",
+    )
+    parser.add_argument(
+        "--no-auto-pause",
+        action="store_true",
+        help="Disable automatic pausing at segment end timestamp",
+    )
+    parser.add_argument(
+        "--keep-mpv",
+        action="store_true",
+        help="Leave mpv open after exiting fzf",
+    )
+
+    args = parser.parse_args()
+
+    for binary in ("fzf", "mpv"):
+        if shutil.which(binary) is None:
+            print(f"Error: required command '{binary}' not found in PATH.", file=sys.stderr)
+            return 1
+
+    notes_path = Path(args.notes)
+    if not notes_path.is_file():
+        print(f"Error: markdown file not found: {notes_path}", file=sys.stderr)
+        return 1
+
+    segments = parse_markdown(notes_path)
+    if not segments:
+        print(
+            "Error: no valid timecode entries found in markdown file.\n"
+            "Expected lines like:\n"
+            "  - `[00:12:45-00:14:20]` | `video_file.ru.srt` | One-sentence description.",
+            file=sys.stderr,
+        )
+        return 1
+
+    resources_dir = Path(args.resources)
+    warnings = resolve_videos(segments, resources_dir)
+    assign_video_numbers(segments)
+
+    if warnings:
+        for w in warnings:
+            print(f"Warning: {w}", file=sys.stderr)
+        time.sleep(1.2)
+
+    with tempfile.TemporaryDirectory(prefix="vidjump_") as tmpdir:
+        tmp = Path(tmpdir)
+        mpv_sock = tmp / "mpv.sock"
+        ctl_sock = tmp / "ctl.sock"
+
+        mpv = MpvController(
+            mpv_sock=mpv_sock,
+            auto_pause=not args.no_auto_pause,
+            keep_mpv=args.keep_mpv,
+        )
+        server = ControlServer(sock_path=ctl_sock, segments=segments, mpv=mpv)
+
+        def handle_sig(_signum: int, _frame: object) -> None:
+            server.stop()
+            mpv.shutdown()
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, handle_sig)
+
+        try:
+            mpv.ensure_started()
+            server.start()
+            return run_fzf(segments, ctl_sock)
+        finally:
+            server.stop()
+            mpv.shutdown()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

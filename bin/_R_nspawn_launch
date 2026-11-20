@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MACHINES_DIR="/var/lib/machines"
+CONTAINER_USER="cn"
+
+if ! command -v fzf &>/dev/null; then
+    echo "Error: 'fzf' is not installed." >&2
+    exit 1
+fi
+
+# List container directories (use sudo only if /var/lib/machines isn't readable)
+if [[ -r "$MACHINES_DIR" ]]; then
+    mapfile -t CONTAINERS < <(find "$MACHINES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+else
+    mapfile -t CONTAINERS < <(sudo find "$MACHINES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+fi
+
+if [[ ${#CONTAINERS[@]} -eq 0 ]]; then
+    echo "No containers found in $MACHINES_DIR." >&2
+    exit 1
+fi
+
+SELECTED="$(printf '%s\n' "${CONTAINERS[@]}" | fzf --prompt="nspawn > " --height=40% --reverse)" || exit 0
+[[ -z "$SELECTED" ]] && exit 0
+
+TARGET_DIR="${MACHINES_DIR}/${SELECTED}"
+
+# If already booted, attach a shell as 'cn'; otherwise boot it with systemd-nspawn
+if machinectl show "$SELECTED" &>/dev/null; then
+    echo "==> '$SELECTED' is already running. Opening shell as '$CONTAINER_USER'..."
+    exec sudo env SYSTEMD_TINT_BACKGROUND=0 machinectl shell "${CONTAINER_USER}@${SELECTED}"
+else
+    echo "==> Booting '$SELECTED'..."
+    exec sudo env SYSTEMD_TINT_BACKGROUND=0 systemd-nspawn --background= -D "$TARGET_DIR" -M "$SELECTED"
+fi
