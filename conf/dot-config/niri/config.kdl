@@ -9,7 +9,7 @@ input {
 
         xkb {
             layout "us,ru"
-	    options "compose:ralt,grp:alt_shift_toggle"
+	        // options "grp:alt_shift_toggle"
         }
     }
 

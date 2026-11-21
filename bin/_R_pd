@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import argparse
 import math
 import os
 import re
@@ -343,9 +344,10 @@ def format_mmss(seconds: float) -> str:
 
 
 def notify(message: str) -> None:
+    cmd = ["notify-send", "-a", "pomodoro", "-c", f"pomodoro-{message}", message]
     try:
         subprocess.Popen(
-            ["notify-send", message],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -356,11 +358,16 @@ def notify(message: str) -> None:
 
 # --- Config Phase ---
 
+DEFAULT_WORK = "45m"
+DEFAULT_BREAK = "5m"
+DEFAULT_SETS = "4"
+
+
 def run_config(term: Terminal) -> tuple[float, float, int] | None:
     fields = [
-        TextField("Work time ", "45m"),
-        TextField("Break time", "5m"),
-        TextField("Sets      ", "4"),
+        TextField("Work time ", DEFAULT_WORK),
+        TextField("Break time", DEFAULT_BREAK),
+        TextField("Sets      ", DEFAULT_SETS),
     ]
     focus = 0
     kill_buf = [""]
@@ -530,10 +537,15 @@ def segment_at(segments: list[tuple[str, float, int]], elapsed: float) -> tuple[
 
 def run_timer(term: Terminal, work_sec: float, break_sec: float, sets: int) -> None:
     segments = build_segments(work_sec, break_sec, sets)
-    total_duration = sum(dur for _, dur, _ in segments)
+    seg_starts: list[float] = []
+    acc = 0.0
+    for _, dur, _ in segments:
+        seg_starts.append(acc)
+        acc += dur
+    total_duration = acc
 
     accumulated = 0.0
-    run_start: float | None = None
+    run_start: float | None = time.monotonic()
     done = False
     last_seg_idx = 0
 
@@ -605,7 +617,7 @@ def run_timer(term: Terminal, work_sec: float, break_sec: float, sets: int) -> N
         time_plain = f"{rem_str}  ({format_mmss(elapsed)} / {format_mmss(total_duration)})"
         time_line = f"{C_BOLD}{rem_str}{C_RESET}  {C_DIM}({format_mmss(elapsed)} / {format_mmss(total_duration)}){C_RESET}"
 
-        hint_plain = "C-q: quit" if done else "C-p: start/pause   C-q: quit"
+        hint_plain = "A-b: back   q: quit" if done else "p: start/pause   A-s: skip   A-b: back   q: quit"
         hint_line = f"{C_DIM}{hint_plain}{C_RESET}"
 
         # Center vertically
@@ -658,32 +670,76 @@ def run_timer(term: Terminal, work_sec: float, break_sec: float, sets: int) -> N
                 render()
             continue
 
-        if key in ("\x11", "\x03"):  # C-q or C-c
+        if key in ("q", "\x03"):  # q or C-c
             return
 
         if key == "\x0c":  # C-l
             render()
             continue
 
-        if key == "\x10" and not done:  # C-p: toggle pause/unpause
+        if key == "p" and not done:  # p: toggle pause/unpause
             if run_start is None:
                 run_start = time.monotonic()
             else:
                 accumulated = min(total_duration, accumulated + (time.monotonic() - run_start))
                 run_start = None
             render()
+            continue
+
+        if key == "ALT:s" and not done:  # Alt-s: skip current block (no notification, stops timer)
+            cur_idx, _ = segment_at(segments, now_elapsed)
+            next_idx = cur_idx + 1
+            run_start = None
+            if next_idx >= len(segments):
+                accumulated = total_duration
+                last_seg_idx = len(segments) - 1
+                done = True
+            else:
+                accumulated = seg_starts[next_idx]
+                last_seg_idx = next_idx
+            render()
+            continue
+
+        if key == "ALT:b":  # Alt-b: back to start of current block (or previous block if at 00:00; restarts last work block if done)
+            run_start = None
+            if done:
+                done = False
+                target_idx = len(segments) - 1
+            else:
+                cur_idx, seg_elapsed = segment_at(segments, now_elapsed)
+                if seg_elapsed <= 1e-6 and cur_idx > 0:
+                    target_idx = cur_idx - 1
+                else:
+                    target_idx = cur_idx
+            accumulated = seg_starts[target_idx]
+            last_seg_idx = target_idx
+            render()
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Terminal Pomodoro timer")
+    parser.add_argument(
+        "-c",
+        "--config",
+        action="store_true",
+        help="Show interactive configuration screen before starting",
+    )
+    args = parser.parse_args()
+
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         sys.stderr.write("Error: interactive TTY required.\n")
         return 1
 
     with Terminal() as term:
-        cfg = run_config(term)
-        if cfg is None:
-            return 0
-        work_sec, break_sec, sets = cfg
+        if args.config:
+            cfg = run_config(term)
+            if cfg is None:
+                return 0
+            work_sec, break_sec, sets = cfg
+        else:
+            work_sec = parse_duration(DEFAULT_WORK)
+            break_sec = parse_duration(DEFAULT_BREAK)
+            sets = parse_sets(DEFAULT_SETS)
         run_timer(term, work_sec, break_sec, sets)
 
     return 0
@@ -691,3 +747,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

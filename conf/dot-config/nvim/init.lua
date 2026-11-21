@@ -71,7 +71,7 @@ vim.opt.autochdir = false
 vim.opt.iskeyword:append("-")
 vim.opt.path:append("**")
 vim.opt.selection = "exclusive"
-vim.opt.mouse = "a"
+vim.opt.mouse = ""
 vim.opt.clipboard:append("unnamedplus")
 vim.opt.modifiable = true
 vim.opt.encoding = "UTF-8"
@@ -114,10 +114,10 @@ vim.keymap.set("n", "<leader>bn", ":bnext<CR>", { desc = "Next buffer" })
 vim.keymap.set("n", "<leader>bp", ":bprevious<CR>", { desc = "Previous buffer" })
 
 -- Splitting & Resizing
-vim.keymap.set("n", "<C-Up>", ":resize +2<CR>", { desc = "Increase window height" })
-vim.keymap.set("n", "<C-Down>", ":resize -2<CR>", { desc = "Decrease window height" })
-vim.keymap.set("n", "<C-Left>", ":vertical resize -2<CR>", { desc = "Decrease window width" })
-vim.keymap.set("n", "<C-Right>", ":vertical resize +2<CR>", { desc = "Increase window width" })
+vim.keymap.set("n", "<A-K>", ":resize +2<CR>", { desc = "Increase window height" })
+vim.keymap.set("n", "<A-J>", ":resize -2<CR>", { desc = "Decrease window height" })
+vim.keymap.set("n", "<A-L>", ":vertical resize -2<CR>", { desc = "Decrease window width" })
+vim.keymap.set("n", "<A-H>", ":vertical resize +2<CR>", { desc = "Increase window width" })
 
 vim.keymap.set("n", "<C-f>", ":lua MiniFiles.open()<cr>")
 
@@ -125,6 +125,102 @@ vim.keymap.set("n", "<A-h>", "<C-w>h")
 vim.keymap.set("n", "<A-j>", "<C-w>j")
 vim.keymap.set("n", "<A-k>", "<C-w>k")
 vim.keymap.set("n", "<A-l>", "<C-w>l")
+
+-- Resize-based window fullscreen toggle (<A-z>)
+local tab_zoom = {} -- [tabpage] = { win = integer, restore_cmd = string, win_count = integer }
+local zoom_augroup = vim.api.nvim_create_augroup("WinZoom", { clear = true })
+
+local function list_normal_wins(tab)
+  local wins = {}
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
+    if vim.api.nvim_win_get_config(w).relative == "" then
+      wins[#wins + 1] = w
+    end
+  end
+  return wins
+end
+
+local function toggle_win_zoom()
+  local cur_win = vim.api.nvim_get_current_win()
+  if vim.api.nvim_win_get_config(cur_win).relative ~= "" then
+    return
+  end
+
+  local tab = vim.api.nvim_get_current_tabpage()
+  local wins = list_normal_wins(tab)
+  if #wins <= 1 then
+    tab_zoom[tab] = nil
+    return
+  end
+
+  local was_term_mode = vim.api.nvim_get_mode().mode == "t"
+  local state = tab_zoom[tab]
+
+  if state and state.win == cur_win then
+    tab_zoom[tab] = nil
+    if #wins == state.win_count and state.restore_cmd and state.restore_cmd ~= "" then
+      local ok = pcall(vim.cmd, state.restore_cmd)
+      if not ok then
+        vim.cmd("wincmd =")
+      end
+    else
+      vim.cmd("wincmd =")
+    end
+    if vim.api.nvim_win_is_valid(cur_win) then
+      vim.api.nvim_set_current_win(cur_win)
+    end
+  else
+    if not state then
+      tab_zoom[tab] = {
+        win = cur_win,
+        restore_cmd = vim.fn.winrestcmd(),
+        win_count = #wins,
+      }
+    else
+      state.win = cur_win
+    end
+    vim.cmd("wincmd |")
+    vim.cmd("wincmd _")
+  end
+
+  if was_term_mode and vim.api.nvim_win_is_valid(cur_win) then
+    if vim.bo[vim.api.nvim_win_get_buf(cur_win)].buftype == "terminal" then
+      vim.cmd.startinsert()
+    end
+  end
+end
+
+vim.api.nvim_create_autocmd("TabClosed", {
+  group = zoom_augroup,
+  callback = function()
+    local valid = {}
+    for _, t in ipairs(vim.api.nvim_list_tabpages()) do
+      valid[t] = true
+    end
+    for t in pairs(tab_zoom) do
+      if not valid[t] then
+        tab_zoom[t] = nil
+      end
+    end
+  end,
+})
+
+vim.api.nvim_create_autocmd("WinClosed", {
+  group = zoom_augroup,
+  callback = function(ev)
+    local closed_win = tonumber(ev.match)
+    if not closed_win then
+      return
+    end
+    for t, st in pairs(tab_zoom) do
+      if st.win == closed_win then
+        tab_zoom[t] = nil
+      end
+    end
+  end,
+})
+
+vim.keymap.set({ "n", "t" }, "<A-z>", toggle_win_zoom, { desc = "Toggle window fullscreen" })
 
 vim.keymap.set('n', 'S', '_V/{<C-m>%o', { silent = true })
 
@@ -156,8 +252,156 @@ end)
 -- ==================================================
 
 -- Tab display settings
-vim.opt.showtabline = 1  -- Always show tabline (0=never, 1=when multiple tabs, 2=always)
-vim.opt.tabline = ''     -- Use default tabline (empty string uses built-in)
+vim.opt.showtabline = 1  -- Show tabline when multiple tabs are open (0=never, 1=multiple, 2=always)
+
+-- Custom tabline: show active process name for <A-t> terminals, default-style label otherwise
+local term_tabline_timer = nil
+local term_tabline_augroup = vim.api.nvim_create_augroup("TermTabline", { clear = true })
+
+local function read_proc_file(path)
+  local f = io.open(path, "r")
+  if not f then
+    return nil
+  end
+  local data = f:read("*a")
+  f:close()
+  return data
+end
+
+local function get_term_proc_name(shell_pid)
+  if not shell_pid or shell_pid <= 0 then
+    return nil
+  end
+  local stat = read_proc_file("/proc/" .. shell_pid .. "/stat")
+  if stat then
+    local rest = stat:match(".*%) (.+)")
+    if rest then
+      local tpgid = tonumber(rest:match("^%S+%s+%S+%s+%S+%s+%S+%s+%S+%s+(%-?%d+)"))
+      if tpgid and tpgid > 0 then
+        local comm = read_proc_file("/proc/" .. tpgid .. "/comm")
+        if comm then
+          local name = vim.trim(comm)
+          if name ~= "" then
+            return name
+          end
+        end
+      end
+    end
+  end
+  local fallback = read_proc_file("/proc/" .. shell_pid .. "/comm")
+  if fallback then
+    local name = vim.trim(fallback)
+    if name ~= "" then
+      return name
+    end
+  end
+  return nil
+end
+
+local function stop_term_tabline_timer()
+  if term_tabline_timer then
+    term_tabline_timer:stop()
+  end
+end
+
+local function refresh_term_tabline(force_redraw)
+  local tabs = vim.api.nvim_list_tabpages()
+  local has_active_term = false
+  local changed = false
+
+  for _, tab in ipairs(tabs) do
+    local win = vim.api.nvim_tabpage_get_win(tab)
+    if vim.api.nvim_win_is_valid(win) then
+      local buf = vim.api.nvim_win_get_buf(win)
+      local pid = vim.b[buf].win_term_pid
+      if pid then
+        has_active_term = true
+        local proc = get_term_proc_name(pid)
+        if proc and proc ~= vim.b[buf].win_term_proc then
+          vim.b[buf].win_term_proc = proc
+          changed = true
+        end
+      end
+    end
+  end
+
+  if has_active_term then
+    if not term_tabline_timer then
+      term_tabline_timer = vim.uv.new_timer()
+    end
+    if term_tabline_timer and not term_tabline_timer:is_active() then
+      term_tabline_timer:start(5000, 5000, vim.schedule_wrap(function()
+        refresh_term_tabline(false)
+      end))
+    end
+  else
+    stop_term_tabline_timer()
+  end
+
+  if (changed or force_redraw) and #tabs > 1 then
+    vim.cmd.redrawtabline()
+  end
+end
+
+local function truncate_tab_label(str, max_len)
+  if max_len <= 0 then
+    return ""
+  end
+  if vim.fn.strchars(str) <= max_len then
+    return str
+  end
+  if max_len == 1 then
+    return "…"
+  end
+  return vim.fn.strcharpart(str, 0, max_len - 1) .. "…"
+end
+
+function _G.custom_tabline()
+  local tabs = vim.api.nvim_list_tabpages()
+  local cur_tab = vim.api.nvim_get_current_tabpage()
+  local max_label_len = 10
+  local parts = {}
+
+  for i, tab in ipairs(tabs) do
+    local hl = (tab == cur_tab) and "%#TabLineSel#" or "%#TabLine#"
+    local win = vim.api.nvim_tabpage_get_win(tab)
+    local buf = vim.api.nvim_win_get_buf(win)
+    local label
+    local suffix = ""
+
+    local pid = vim.b[buf].win_term_pid
+    if pid then
+      label = vim.b[buf].win_term_proc or get_term_proc_name(pid) or vim.fn.fnamemodify(vim.o.shell, ":t")
+    else
+      local name = vim.api.nvim_buf_get_name(buf)
+      if name == "" then
+        label = "[No Name]"
+      else
+        local tail = vim.fn.fnamemodify(name, ":t")
+        label = tail ~= "" and tail or name
+      end
+      if vim.bo[buf].modified then
+        suffix = " +"
+      end
+    end
+
+    label = truncate_tab_label(label, max_label_len - #suffix) .. suffix
+    label = label:gsub("%%", "%%%%")
+    parts[#parts + 1] = string.format("%s%%%dT %d %s %%T", hl, i, i, label)
+  end
+
+  parts[#parts + 1] = "%#TabLineFill#"
+  return table.concat(parts)
+end
+
+vim.o.tabline = "%!v:lua.custom_tabline()"
+
+vim.api.nvim_create_autocmd({ "TabEnter", "WinEnter", "BufEnter" }, {
+  group = term_tabline_augroup,
+  callback = function()
+    refresh_term_tabline(false)
+  end,
+})
 
 -- Alternative navigation (more intuitive)
 vim.keymap.set('n', '<C-t>', ':tabnew<CR>', { desc = 'New tab' })
@@ -405,7 +649,7 @@ vim.lsp.enable({
 -- TERMINAL
 -- ==================================================
 
--- Per-window persistent terminal toggle (<M-t>)
+-- Per-window persistent terminal toggle (<A-t>)
 local win_terms = {} -- [winid] = { term_buf = integer?, prev_buf = integer? }
 local term_augroup = vim.api.nvim_create_augroup("WinTermToggle", { clear = true })
 
@@ -435,6 +679,7 @@ local function restore_prev_buf(win, state, closed_term_buf)
     vim.cmd.stopinsert()
   end
   vim.api.nvim_win_set_buf(win, target)
+  refresh_term_tabline(true)
 end
 
 local function toggle_win_term()
@@ -462,6 +707,7 @@ local function toggle_win_term()
   -- Reuse existing live terminal for this window
   if state.term_buf and vim.api.nvim_buf_is_valid(state.term_buf) then
     vim.api.nvim_win_set_buf(win, state.term_buf)
+    refresh_term_tabline(true)
     vim.cmd.startinsert()
     return
   end
@@ -475,8 +721,7 @@ local function toggle_win_term()
   vim.bo[term_buf].buflisted = false
   vim.bo[term_buf].bufhidden = "hide"
 
-  vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { buffer = term_buf, desc = "Terminal normal mode" })
-  vim.keymap.set("t", "<C-[>", [[<C-\><C-n>]], { buffer = term_buf, desc = "Terminal normal mode" })
+  vim.keymap.set("t", "<A-n>", [[<C-\><C-n>]], { buffer = term_buf, desc = "Terminal normal mode" })
 
   state.term_buf = term_buf
   vim.api.nvim_win_set_buf(win, term_buf)
@@ -508,6 +753,13 @@ local function toggle_win_term()
     return
   end
 
+  local ok, pid = pcall(vim.fn.jobpid, job_id)
+  if ok and pid and pid > 0 then
+    vim.b[term_buf].win_term_pid = pid
+    vim.b[term_buf].win_term_proc = get_term_proc_name(pid) or vim.fn.fnamemodify(vim.o.shell, ":t")
+  end
+  refresh_term_tabline(true)
+
   vim.cmd.startinsert()
 end
 
@@ -532,4 +784,4 @@ vim.api.nvim_create_autocmd("WinClosed", {
   end,
 })
 
-vim.keymap.set({ "n", "t" }, "<M-t>", toggle_win_term, { desc = "Toggle window terminal" })
+vim.keymap.set({ "n", "t" }, "<A-t>", toggle_win_term, { desc = "Toggle window terminal" })
