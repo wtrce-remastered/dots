@@ -1,0 +1,841 @@
+#!/usr/bin/python3
+"""Standalone toggle audio recorder powered by PipeWire (pw-record + pw-loopback).
+
+Designed to be bound to a desktop keybind:
+- First invocation starts recording in the background and saves PID/state to /tmp.
+- Second invocation interrupts pw-record cleanly (SIGINT) so the audio file is
+  finalized and saved under $HOME/records/<timestamp>.flac, then tears down any
+  temporary PipeWire loopback routing.
+
+By default, records BOTH the default microphone and system sound (default output
+sink monitor) mixed in real time into a single .flac file via pw-loopback.
+Use --mic-only or --system-only to record a single source directly.
+"""
+
+from __future__ import annotations
+
+import argparse
+import errno
+import fcntl
+import json
+import os
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+DEFAULT_OUTPUT_DIR = Path.home() / "records"
+DEFAULT_EXT = "flac"
+DEFAULT_PID_FILE = Path("/tmp") / f"pw-record-{os.getuid()}.pid"
+PW_RECORD_BIN = os.environ.get("PW_RECORD_BIN", "pw-record")
+PW_LOOPBACK_BIN = os.environ.get("PW_LOOPBACK_BIN", "pw-loopback")
+NOTIFY_SEND_BIN = os.environ.get("NOTIFY_SEND_BIN", "notify-send")
+
+MIXER_SETTLE_SECONDS = 0.15
+STARTUP_GRACE_SECONDS = 0.25
+STARTUP_POLL_INTERVAL = 0.05
+SIGINT_TIMEOUT_SECONDS = 5.0
+SIGTERM_TIMEOUT_SECONDS = 3.0
+SIGKILL_TIMEOUT_SECONDS = 1.0
+HELPER_STOP_TIMEOUT_SECONDS = 2.0
+STOP_POLL_INTERVAL = 0.05
+
+APP_NAME = "Audio Recorder"
+NOTIFY_SYNC_HINT = "string:x-canonical-private-synchronous:pw-record-toggle"
+
+MODE_LABELS = {
+    "both": "Mic + System",
+    "mic": "Mic",
+    "system": "System",
+}
+
+
+def notify(
+    summary: str,
+    body: str = "",
+    *,
+    urgency: str = "normal",
+    icon: str = "audio-input-microphone",
+    expire_ms: int | None = 3500,
+    enabled: bool = True,
+) -> None:
+    """Send a desktop notification via notify-send if available."""
+    if not enabled:
+        return
+
+    notify_bin = shutil.which(NOTIFY_SEND_BIN)
+    if not notify_bin:
+        return
+
+    cmd = [
+        notify_bin,
+        "--app-name",
+        APP_NAME,
+        "--urgency",
+        urgency,
+        "--icon",
+        icon,
+        "--hint",
+        NOTIFY_SYNC_HINT,
+    ]
+    if expire_ms is not None and urgency != "critical":
+        cmd.extend(["--expire-time", str(expire_ms)])
+    cmd.append(summary)
+    if body:
+        cmd.append(body)
+
+    try:
+        subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def format_duration(seconds: float) -> str:
+    """Format elapsed seconds as MM:SS or HH:MM:SS."""
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def format_size(num_bytes: int) -> str:
+    """Format byte size into a compact human-readable string."""
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024.0 or unit == "GB":
+            if unit == "B":
+                return f"{int(size)} B"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{num_bytes} B"
+
+
+def _proc_state(pid: int) -> str | None:
+    """Return single-character Linux process state from /proc/<pid>/stat, or None."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    rparen = raw.rfind(")")
+    if rparen == -1:
+        return None
+    rest = raw[rparen + 1 :].strip().split()
+    return rest[0] if rest else None
+
+
+def is_process_alive(pid: int) -> bool:
+    """Check whether a process owned by the current user is alive (and not a zombie)."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+
+    state = _proc_state(pid)
+    if state in {"Z", "X", "x"}:
+        return False
+    return True
+
+
+def is_expected_process(pid: int, expected_names: set[str]) -> bool:
+    """Verify PID is alive and matches one of the expected executable names."""
+    if not is_process_alive(pid):
+        return False
+
+    cmdline_path = Path(f"/proc/{pid}/cmdline")
+    try:
+        raw = cmdline_path.read_bytes()
+    except OSError:
+        return False
+
+    if raw:
+        argv = [part.decode("utf-8", errors="replace") for part in raw.split(b"\x00") if part]
+        if argv:
+            if Path(argv[0]).name in expected_names:
+                return True
+            # Handle interpreted wrappers/scripts (e.g., python/sh wrapper in tests)
+            if len(argv) > 1 and Path(argv[1]).name in expected_names:
+                return True
+
+    comm_path = Path(f"/proc/{pid}/comm")
+    try:
+        comm = comm_path.read_text(encoding="utf-8", errors="replace").strip()
+        if comm in expected_names:
+            return True
+    except OSError:
+        pass
+
+    return False
+
+
+def acquire_lock(lock_path: Path) -> int:
+    """Open and exclusively lock a user-owned lock file (refusing symlinks)."""
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            raise PermissionError(f"Refusing to use lock file not owned by current user: {lock_path}")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def release_lock(fd: int) -> None:
+    """Release file lock and close descriptor."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def read_state(pid_file: Path) -> dict[str, Any] | None:
+    """Read recording state from the PID file. Supports JSON or bare integer PID."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(pid_file, flags)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise PermissionError(f"Refusing to follow symlink PID file: {pid_file}") from exc
+        return None
+
+    owned_fd = True
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            raise PermissionError(f"Refusing to read PID file not owned by current user: {pid_file}")
+        owned_fd = False
+        with os.fdopen(fd, "r", encoding="utf-8") as fh:
+            raw = fh.read().strip()
+    except Exception:
+        if owned_fd:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        raise
+
+    if not raw:
+        return None
+
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and isinstance(data.get("pid"), int):
+            return data
+        if isinstance(data, int):
+            return {"pid": data}
+    except json.JSONDecodeError:
+        if raw.isdigit():
+            return {"pid": int(raw)}
+
+    return None
+
+
+def write_state(pid_file: Path, state: dict[str, Any]) -> None:
+    """Atomically write recording state JSON to pid_file with 0600 permissions."""
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        dir=str(pid_file.parent),
+        prefix=f".{pid_file.name}.",
+        suffix=".tmp",
+    )
+    try:
+        os.fchmod(tmp_fd, 0o600)
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, pid_file)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def open_log_file(log_path: Path) -> Any:
+    """Open user-owned stderr log file safely (refusing symlinks)."""
+    flags = os.O_CREAT | os.O_WRONLY | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(log_path, flags, 0o600)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            raise PermissionError(f"Refusing to use log file not owned by current user: {log_path}")
+        return os.fdopen(fd, "w", encoding="utf-8")
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def read_log_excerpt(log_path: Path, max_chars: int = 300) -> str:
+    """Read a short excerpt from the PipeWire stderr log if present."""
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+    if len(text) > max_chars:
+        return text[-max_chars:]
+    return text
+
+
+def build_output_path(output_dir: Path, ext: str) -> Path:
+    """Generate a unique timestamp-based output filepath under output_dir."""
+    clean_ext = ext.lstrip(".").strip().lower()
+    if not clean_ext or not all(ch.isalnum() for ch in clean_ext):
+        raise ValueError(f"Invalid audio extension: {ext!r}")
+
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    candidate = output_dir / f"{stamp}.{clean_ext}"
+    counter = 1
+    while candidate.exists():
+        candidate = output_dir / f"{stamp}_{counter}.{clean_ext}"
+        counter += 1
+    return candidate
+
+
+def wait_for_exit(pid: int, timeout: float) -> bool:
+    """Wait up to timeout seconds for pid to terminate. Returns True if exited."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_process_alive(pid):
+            return True
+        time.sleep(STOP_POLL_INTERVAL)
+    return not is_process_alive(pid)
+
+
+def terminate_helper_pids(helper_pids: list[int], expected_names: set[str]) -> None:
+    """Stop pw-loopback helper processes in order, verifying PID identity first."""
+    for hpid in helper_pids:
+        if not isinstance(hpid, int) or not is_expected_process(hpid, expected_names):
+            continue
+        try:
+            os.kill(hpid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        if not wait_for_exit(hpid, HELPER_STOP_TIMEOUT_SECONDS):
+            try:
+                os.kill(hpid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            wait_for_exit(hpid, SIGKILL_TIMEOUT_SECONDS)
+
+
+def terminate_spawned(procs: list[subprocess.Popen[Any]]) -> None:
+    """Rollback helper: terminate newly spawned child processes in reverse order."""
+    for proc in reversed(procs):
+        if proc.poll() is not None:
+            continue
+        try:
+            proc.terminate()
+        except OSError:
+            continue
+        try:
+            proc.wait(timeout=HELPER_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=SIGKILL_TIMEOUT_SECONDS)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+
+
+def spawn_detached(cmd: list[str], log_fh: Any) -> subprocess.Popen[Any]:
+    """Spawn a process detached from the calling session/keybind launcher."""
+    return subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=log_fh,
+        start_new_session=True,
+        close_fds=True,
+    )
+
+
+def build_mixer_commands(
+    pw_loopback_path: str,
+    *,
+    mic_target: str | None,
+    system_target: str | None,
+) -> tuple[list[str], list[str], list[str], str]:
+    """Build pw-loopback commands for real-time mic + system audio mixing.
+
+    Architecture:
+      1. Mixer bus: Audio/Sink (mix_sink) -> Audio/Source (mix_src)
+         priority.session=0 & priority.driver=0 keep WirePlumber from switching
+         the user's default speakers/microphone to this temporary virtual bus.
+      2. Mic feed: default mic (or mic_target) -> mix_sink (node.dont-reconnect=true)
+      3. System feed: default sink monitor (stream.capture.sink=true, or system_target)
+         -> mix_sink (node.dont-reconnect=true)
+      4. pw-record captures from mix_src into a single .flac file.
+    """
+    tag = f"{os.getuid()}-{os.getpid()}"
+    mix_sink = f"pw-rec-mix-sink-{tag}"
+    mix_src = f"pw-rec-mix-src-{tag}"
+
+    mixer_cmd = [
+        pw_loopback_path,
+        "--channels=2",
+        "--channel-map=[FL,FR]",
+        "--capture-props",
+        json.dumps(
+            {
+                "media.class": "Audio/Sink",
+                "node.name": mix_sink,
+                "node.description": "Audio Recorder Mix Sink",
+                "priority.session": 0,
+                "priority.driver": 0,
+                "node.virtual": True,
+            }
+        ),
+        "--playback-props",
+        json.dumps(
+            {
+                "media.class": "Audio/Source",
+                "node.name": mix_src,
+                "node.description": "Audio Recorder Mix Source",
+                "priority.session": 0,
+                "priority.driver": 0,
+                "node.virtual": True,
+            }
+        ),
+    ]
+
+    mic_capture_props: dict[str, Any] = {
+        "node.name": f"pw-rec-mic-in-{tag}",
+        "node.description": "Audio Recorder Mic Input",
+    }
+    mic_playback_props: dict[str, Any] = {
+        "node.name": f"pw-rec-mic-out-{tag}",
+        "node.dont-reconnect": True,
+    }
+    mic_cmd = [
+        pw_loopback_path,
+        "--channels=2",
+        "--channel-map=[FL,FR]",
+        "--playback",
+        mix_sink,
+    ]
+    if mic_target:
+        mic_cmd.extend(["--capture", mic_target])
+    mic_cmd.extend(
+        [
+            "--capture-props",
+            json.dumps(mic_capture_props),
+            "--playback-props",
+            json.dumps(mic_playback_props),
+        ]
+    )
+
+    sys_capture_props: dict[str, Any] = {
+        "node.name": f"pw-rec-sys-in-{tag}",
+        "node.description": "Audio Recorder System Input",
+        "stream.capture.sink": True,
+    }
+    sys_playback_props: dict[str, Any] = {
+        "node.name": f"pw-rec-sys-out-{tag}",
+        "node.dont-reconnect": True,
+    }
+    sys_cmd = [
+        pw_loopback_path,
+        "--channels=2",
+        "--channel-map=[FL,FR]",
+        "--playback",
+        mix_sink,
+    ]
+    if system_target:
+        sys_cmd.extend(["--capture", system_target])
+    sys_cmd.extend(
+        [
+            "--capture-props",
+            json.dumps(sys_capture_props),
+            "--playback-props",
+            json.dumps(sys_playback_props),
+        ]
+    )
+
+    return mixer_cmd, mic_cmd, sys_cmd, mix_src
+
+
+def stop_recording(
+    state: dict[str, Any],
+    pid_file: Path,
+    log_path: Path,
+    *,
+    notifications: bool,
+) -> int:
+    """Gracefully stop pw-record first, then tear down any pw-loopback helpers."""
+    pid = int(state["pid"])
+    output_path_raw = state.get("output_path")
+    output_path = Path(output_path_raw) if output_path_raw else None
+    started_at = state.get("started_at")
+
+    helper_pids_raw = state.get("helper_pids")
+    helper_pids = [p for p in helper_pids_raw if isinstance(p, int)] if isinstance(helper_pids_raw, list) else []
+    helper_expected = {"pw-loopback", Path(PW_LOOPBACK_BIN).name}
+    if isinstance(state.get("helper_exe"), str) and state["helper_exe"]:
+        helper_expected.add(state["helper_exe"])
+
+    forced_kill = False
+    try:
+        os.kill(pid, signal.SIGINT)
+    except ProcessLookupError:
+        pass
+
+    if not wait_for_exit(pid, SIGINT_TIMEOUT_SECONDS):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+        if not wait_for_exit(pid, SIGTERM_TIMEOUT_SECONDS):
+            forced_kill = True
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            wait_for_exit(pid, SIGKILL_TIMEOUT_SECONDS)
+
+    # Tear down loopback feeds first, then virtual mixer bus last (prevents any reconnect glitch).
+    if helper_pids:
+        terminate_helper_pids(helper_pids, helper_expected)
+
+    pid_file.unlink(missing_ok=True)
+
+    duration_str = ""
+    if isinstance(started_at, (int, float)):
+        duration_str = format_duration(time.time() - float(started_at))
+
+    if forced_kill:
+        msg = "pw-record did not exit cleanly and was force-killed."
+        if output_path:
+            msg += f" File may be incomplete: {output_path}"
+        print(msg, file=sys.stderr)
+        notify("Recording force-stopped", msg, urgency="critical", icon="dialog-warning", enabled=notifications)
+        return 1
+
+    if output_path is not None:
+        if output_path.is_file() and output_path.stat().st_size > 0:
+            size_str = format_size(output_path.stat().st_size)
+            details = [part for part in (duration_str, size_str) if part]
+            detail_suffix = f" ({', '.join(details)})" if details else ""
+            body = f"{output_path.name}{detail_suffix}"
+            print(f"Saved recording: {output_path}{detail_suffix}")
+            notify("Recording saved", body, icon="audio-x-generic", enabled=notifications)
+            log_path.unlink(missing_ok=True)
+            return 0
+
+        err = read_log_excerpt(log_path)
+        body = f"Recording file is missing or empty: {output_path.name}"
+        if err:
+            body += f"\n{err}"
+        print(body, file=sys.stderr)
+        notify("Recording failed", body, urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+
+    print("Stopped recording.")
+    notify("Recording stopped", duration_str, icon="media-playback-stop", enabled=notifications)
+    log_path.unlink(missing_ok=True)
+    return 0
+
+
+def start_recording(
+    output_dir: Path,
+    ext: str,
+    pid_file: Path,
+    log_path: Path,
+    *,
+    mode: str,
+    mic_target: str | None,
+    system_target: str | None,
+    pw_record_args: list[str],
+    notifications: bool,
+) -> int:
+    """Start PipeWire recording detached in the background and save PID state."""
+    pw_record_path = shutil.which(PW_RECORD_BIN)
+    if not pw_record_path:
+        msg = f"'{PW_RECORD_BIN}' not found in PATH. Please install PipeWire utilities."
+        print(msg, file=sys.stderr)
+        notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+
+    pw_loopback_path: str | None = None
+    if mode == "both":
+        pw_loopback_path = shutil.which(PW_LOOPBACK_BIN)
+        if not pw_loopback_path:
+            msg = (
+                f"'{PW_LOOPBACK_BIN}' not found in PATH. "
+                "Install PipeWire utilities or use --mic-only / --system-only."
+            )
+            print(msg, file=sys.stderr)
+            notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+            return 1
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = build_output_path(output_dir, ext)
+
+    try:
+        log_fh = open_log_file(log_path)
+    except OSError as exc:
+        msg = f"Failed to open log file {log_path}: {exc}"
+        print(msg, file=sys.stderr)
+        notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+
+    spawned: list[subprocess.Popen[Any]] = []
+    # Teardown order for helpers: feed loopbacks first, virtual mixer bus last.
+    helper_teardown_pids: list[int] = []
+
+    try:
+        if mode == "both":
+            assert pw_loopback_path is not None
+            mixer_cmd, mic_cmd, sys_cmd, mix_src = build_mixer_commands(
+                pw_loopback_path,
+                mic_target=mic_target,
+                system_target=system_target,
+            )
+
+            mixer_proc = spawn_detached(mixer_cmd, log_fh)
+            spawned.append(mixer_proc)
+
+            # Give PipeWire a brief moment to register the virtual mix sink/source nodes.
+            settle_deadline = time.monotonic() + MIXER_SETTLE_SECONDS
+            while time.monotonic() < settle_deadline:
+                if mixer_proc.poll() is not None:
+                    raise RuntimeError(f"pw-loopback mixer exited immediately (code {mixer_proc.returncode}).")
+                time.sleep(STARTUP_POLL_INTERVAL)
+
+            mic_proc = spawn_detached(mic_cmd, log_fh)
+            spawned.append(mic_proc)
+
+            sys_proc = spawn_detached(sys_cmd, log_fh)
+            spawned.append(sys_proc)
+
+            helper_teardown_pids = [mic_proc.pid, sys_proc.pid, mixer_proc.pid]
+
+            rec_cmd = [pw_record_path, "--target", mix_src]
+            rec_cmd.extend(pw_record_args)
+            rec_cmd.append(str(output_path))
+        elif mode == "system":
+            rec_cmd = [pw_record_path, "-P", json.dumps({"stream.capture.sink": True})]
+            chosen_sink = system_target or mic_target
+            if chosen_sink:
+                rec_cmd.extend(["--target", chosen_sink])
+            rec_cmd.extend(pw_record_args)
+            rec_cmd.append(str(output_path))
+        else:  # mic
+            rec_cmd = [pw_record_path]
+            if mic_target:
+                rec_cmd.extend(["--target", mic_target])
+            rec_cmd.extend(pw_record_args)
+            rec_cmd.append(str(output_path))
+
+        rec_proc = spawn_detached(rec_cmd, log_fh)
+        spawned.append(rec_proc)
+    except (OSError, RuntimeError) as exc:
+        log_fh.close()
+        terminate_spawned(spawned)
+        err = read_log_excerpt(log_path)
+        msg = f"Failed to start recording: {exc}"
+        if err:
+            msg += f"\n{err}"
+        print(msg, file=sys.stderr)
+        notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+    finally:
+        log_fh.close()
+
+    # Verify all spawned processes stay alive past initial PipeWire connection.
+    deadline = time.monotonic() + STARTUP_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        for proc in spawned:
+            rc = proc.poll()
+            if rc is not None:
+                failed_name = "pw-record" if proc is rec_proc else "pw-loopback"
+                terminate_spawned(spawned)
+                try:
+                    if output_path.is_file() and output_path.stat().st_size == 0:
+                        output_path.unlink()
+                except OSError:
+                    pass
+                err = read_log_excerpt(log_path)
+                msg = f"{failed_name} exited immediately (code {rc})."
+                if err:
+                    msg += f"\n{err}"
+                print(msg, file=sys.stderr)
+                notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+                return 1
+        time.sleep(STARTUP_POLL_INTERVAL)
+
+    state: dict[str, Any] = {
+        "pid": rec_proc.pid,
+        "mode": mode,
+        "output_path": str(output_path),
+        "started_at": time.time(),
+        "exe": Path(pw_record_path).name,
+    }
+    if helper_teardown_pids:
+        state["helper_pids"] = helper_teardown_pids
+        state["helper_exe"] = Path(pw_loopback_path).name if pw_loopback_path else "pw-loopback"
+    write_state(pid_file, state)
+
+    mode_label = MODE_LABELS.get(mode, mode)
+    body = f"{mode_label} → {output_path.name}"
+    print(f"Started recording [{mode_label}] (PID {rec_proc.pid}): {output_path}")
+    notify("Recording started", body, icon="media-record", enabled=notifications)
+    return 0
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Toggle audio recording (mic + system sound by default) using PipeWire.",
+        epilog="Pass extra flags to pw-record after '--', e.g.: record.py -- --rate 48000",
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--mic-only",
+        action="store_true",
+        help="Record only the microphone (skip system audio loopback).",
+    )
+    mode_group.add_argument(
+        "--system-only",
+        action="store_true",
+        help="Record only system sound (default output sink monitor).",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        default=None,
+        help="PipeWire target node name or ID for microphone input (or sink in --system-only).",
+    )
+    parser.add_argument(
+        "-s",
+        "--system-target",
+        default=None,
+        help="PipeWire output sink node name or ID for system audio capture.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help=f"Directory to store recordings (default: {DEFAULT_OUTPUT_DIR}).",
+    )
+    parser.add_argument(
+        "--ext",
+        default=DEFAULT_EXT,
+        help=f"Output file extension / container format (default: {DEFAULT_EXT}).",
+    )
+    parser.add_argument(
+        "--pid-file",
+        type=Path,
+        default=DEFAULT_PID_FILE,
+        help=f"Path to the PID/state file (default: {DEFAULT_PID_FILE}).",
+    )
+    parser.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="Disable notify-send desktop notifications.",
+    )
+    parser.add_argument(
+        "pw_record_args",
+        nargs=argparse.REMAINDER,
+        help="Optional extra arguments forwarded to pw-record (prefix with '--').",
+    )
+    args = parser.parse_args(argv)
+    if args.pw_record_args and args.pw_record_args[0] == "--":
+        args.pw_record_args = args.pw_record_args[1:]
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    notifications = not args.no_notify
+
+    if args.mic_only:
+        mode = "mic"
+    elif args.system_only:
+        mode = "system"
+    else:
+        mode = "both"
+
+    pid_file: Path = args.pid_file
+    lock_path = Path(f"{pid_file}.lock")
+    log_path = Path(f"{pid_file}.log")
+
+    try:
+        lock_fd = acquire_lock(lock_path)
+    except OSError as exc:
+        msg = f"Failed to acquire lock {lock_path}: {exc}"
+        print(msg, file=sys.stderr)
+        notify("Recording failed", msg, urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+
+    try:
+        state = read_state(pid_file)
+        if state is not None:
+            pid = int(state["pid"])
+            expected_names = {"pw-record", "pw-cat", Path(PW_RECORD_BIN).name}
+            if isinstance(state.get("exe"), str) and state["exe"]:
+                expected_names.add(state["exe"])
+
+            if is_expected_process(pid, expected_names):
+                return stop_recording(state, pid_file, log_path, notifications=notifications)
+
+            # Stale pw-record PID: also clean up any leftover pw-loopback helpers before restarting.
+            helper_pids_raw = state.get("helper_pids")
+            if isinstance(helper_pids_raw, list):
+                helper_expected = {"pw-loopback", Path(PW_LOOPBACK_BIN).name}
+                if isinstance(state.get("helper_exe"), str) and state["helper_exe"]:
+                    helper_expected.add(state["helper_exe"])
+                terminate_helper_pids(
+                    [p for p in helper_pids_raw if isinstance(p, int)],
+                    helper_expected,
+                )
+            pid_file.unlink(missing_ok=True)
+
+        return start_recording(
+            output_dir=args.output_dir,
+            ext=args.ext,
+            pid_file=pid_file,
+            log_path=log_path,
+            mode=mode,
+            mic_target=args.target,
+            system_target=args.system_target,
+            pw_record_args=args.pw_record_args,
+            notifications=notifications,
+        )
+    except (ValueError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        notify("Recording failed", str(exc), urgency="critical", icon="dialog-error", enabled=notifications)
+        return 1
+    finally:
+        release_lock(lock_fd)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

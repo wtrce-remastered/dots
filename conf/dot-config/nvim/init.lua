@@ -113,13 +113,37 @@ vim.keymap.set("n", "<C-u>", "<C-u>zz", { desc = "Half page up (centered)" })
 vim.keymap.set("n", "<leader>bn", ":bnext<CR>", { desc = "Next buffer" })
 vim.keymap.set("n", "<leader>bp", ":bprevious<CR>", { desc = "Previous buffer" })
 
--- Splitting & Resizing
-vim.keymap.set("n", "<A-K>", ":resize +2<CR>", { desc = "Increase window height" })
-vim.keymap.set("n", "<A-J>", ":resize -2<CR>", { desc = "Decrease window height" })
-vim.keymap.set("n", "<A-L>", ":vertical resize -2<CR>", { desc = "Decrease window width" })
-vim.keymap.set("n", "<A-H>", ":vertical resize +2<CR>", { desc = "Increase window width" })
+-- Resizing (edge-aware: moves the active split border in the pressed direction)
+local function resize_win(dir)
+  if vim.api.nvim_win_get_config(0).relative ~= "" then
+    return
+  end
 
-vim.keymap.set("n", "<C-f>", ":lua MiniFiles.open()<cr>")
+  local cur = vim.fn.winnr()
+  if dir == "h" or dir == "l" then
+    local at_right = vim.fn.winnr("l") == cur
+    if at_right and vim.fn.winnr("h") == cur then
+      return
+    end
+    local grow = (dir == "l") ~= at_right
+    vim.cmd("vertical resize " .. (grow and "+4" or "-4"))
+  elseif dir == "j" or dir == "k" then
+    local at_bottom = vim.fn.winnr("j") == cur
+    if at_bottom and vim.fn.winnr("k") == cur then
+      return
+    end
+    local grow = (dir == "j") ~= at_bottom
+    vim.cmd("resize " .. (grow and "+2" or "-2"))
+  end
+end
+
+vim.keymap.set({ "n", "t" }, "<A-H>", function() resize_win("h") end, { desc = "Resize window left" })
+vim.keymap.set({ "n", "t" }, "<A-J>", function() resize_win("j") end, { desc = "Resize window down" })
+vim.keymap.set({ "n", "t" }, "<A-K>", function() resize_win("k") end, { desc = "Resize window up" })
+vim.keymap.set({ "n", "t" }, "<A-L>", function() resize_win("l") end, { desc = "Resize window right" })
+vim.keymap.set({ "n", "t" }, "<A-=>", function() vim.cmd("wincmd =") end, { desc = "Equalize window sizes" })
+
+vim.keymap.set("n", "<C-f>", ":lua MiniFiles.open()<cr>", { silent = true })
 
 vim.keymap.set("n", "<A-h>", "<C-w>h")
 vim.keymap.set("n", "<A-j>", "<C-w>j")
@@ -496,7 +520,57 @@ require("mini.comment").setup({})
 require("mini.completion").setup({})
 require("mini.surround").setup({})
 require("mini.pairs").setup({})
-require("mini.files").setup({})
+local function is_text_file(fs_entry)
+  if fs_entry.fs_type ~= "file" then
+    return true
+  end
+
+  local stat = vim.uv.fs_stat(fs_entry.path)
+  if not stat or stat.type ~= "file" then
+    return false
+  end
+  if stat.size == 0 then
+    return true
+  end
+
+  local f = io.open(fs_entry.path, "rb")
+  if not f then
+    return false
+  end
+  local chunk = f:read(4096)
+  f:close()
+
+  return not (chunk and chunk:find("\0", 1, true))
+end
+
+require("mini.files").setup({
+  content = {
+    filter = is_text_file,
+  },
+})
+
+local mini_files_show_all = false
+local mini_files_augroup = vim.api.nvim_create_augroup("MiniFilesFilterToggle", { clear = true })
+
+vim.api.nvim_create_autocmd("User", {
+  group = mini_files_augroup,
+  pattern = "MiniFilesBufferCreate",
+  callback = function(args)
+    vim.keymap.set("n", "g.", function()
+      mini_files_show_all = not mini_files_show_all
+      local filter = mini_files_show_all and function() return true end or is_text_file
+      MiniFiles.refresh({ content = { filter = filter } })
+    end, { buffer = args.data.buf_id, desc = "Toggle non-text files" })
+  end,
+})
+
+vim.api.nvim_create_autocmd("User", {
+  group = mini_files_augroup,
+  pattern = "MiniFilesExplorerClose",
+  callback = function()
+    mini_files_show_all = false
+  end,
+})
 
 -- ==================================================
 -- LSP CONFIGURATION
@@ -785,3 +859,4 @@ vim.api.nvim_create_autocmd("WinClosed", {
 })
 
 vim.keymap.set({ "n", "t" }, "<A-t>", toggle_win_term, { desc = "Toggle window terminal" })
+

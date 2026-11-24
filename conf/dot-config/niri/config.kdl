@@ -99,20 +99,22 @@ workspace "_9"
 workspace "_10"
 
 binds {
-    Mod+T { spawn "st"; }
-    Mod+S { spawn-sh "st /usr/local/bin/_R_ts"; }
+    Mod+T { spawn "alacritty"; }
+    Mod+S { spawn-sh "alacritty /usr/local/bin/_R_ts"; }
 
     Mod+D { spawn "fuzzel"; }
 
     Mod+N { spawn-sh "makoctl dismiss --all"; }
 
-    Mod+B { spawn-sh "librewolf --private-window"; }
+    Mod+Shift+R { spawn-sh "/usr/local/bin/_R_rec_audio"; }
+
+    Mod+B { spawn-sh "chromium --profile-directory=Default"; }
 
     Mod+P { spawn-sh "/usr/local/bin/_R_infpd"; }
 
-    Mod+Shift+P { spawn-sh "st -T ask-for-sudo _R_proxy_toggle"; }
+    Mod+Shift+P { spawn-sh "alacritty -T ask-for-sudo _R_proxy_toggle"; }
 
-    Mod+Shift+D { spawn-sh "st /usr/bin/btop"; }
+    Mod+Shift+D { spawn-sh "alacritty /usr/bin/btop"; }
 
     XF86AudioMute        { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
     XF86AudioMicMute     { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
@@ -169,7 +171,6 @@ binds {
     Mod+Period { expel-window-from-column; }
 
     Mod+R { switch-preset-column-width; }
-    Mod+Shift+R { switch-preset-column-width-back; }
 
     Mod+Ctrl+Shift+R { switch-preset-window-height; }
     Mod+Ctrl+R { reset-window-height; }
